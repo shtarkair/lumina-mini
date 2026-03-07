@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "drum-machine",
+      "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
+      "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/drum-machine/server.js"],
+      "port": 3456
+    },
+    {
+      "name": "lighting-app",
+      "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
+      "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/lighting-server.js"],
+      "port": 3457
+    }
+  ]
+}

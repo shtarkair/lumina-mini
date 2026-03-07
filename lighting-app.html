@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LUMINA FX - Lighting Timeline Sequencer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #0f1115; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+const EASINGS = {
+  step:   { label:"STEP",     icon:"\u23F9", fn: t => t < 1 ? 0 : 1 },
+  linear: { label:"LINEAR",   icon:"/", fn: t => t },
+  easeIn: { label:"EASE IN",  icon:"\u223C", fn: t => t * t },
+  easeOut:{ label:"EASE OUT", icon:"\u223D", fn: t => t * (2 - t) },
+  sCurve: { label:"S-CURVE",  icon:"S", fn: t => t < 0.5 ? 2*t*t : -1+(4-2*t)*t },
+  bounce: { label:"BOUNCE",   icon:"\u2248", fn: t => {
+    if (t < 1/2.75) return 7.5625*t*t;
+    if (t < 2/2.75) { t -= 1.5/2.75; return 7.5625*t*t+0.75; }
+    if (t < 2.5/2.75) { t -= 2.25/2.75; return 7.5625*t*t+0.9375; }
+    t -= 2.625/2.75; return 7.5625*t*t+0.984375;
+  }},
+};
+
+const PARAM_GROUPS = [
+  { group:"INTENSITY", color:"#cccccc", params:[
+    { id:"dimmer", label:"Dimmer", unit:"%", min:0, max:100, color:"#cccccc" },
+    { id:"strobe", label:"Strobe", unit:"Hz", min:0, max:25, color:"#ffee88" },
+  ]},
+  { group:"POSITION", color:"#44aaff", params:[
+    { id:"pan", label:"Pan", unit:"\u00B0", min:0, max:540, color:"#44aaff" },
+    { id:"tilt", label:"Tilt", unit:"\u00B0", min:0, max:270, color:"#66ccff" },
+  ]},
+  { group:"COLOR", color:"#ff66aa", params:[
+    { id:"cyan", label:"C", unit:"%", min:0, max:100, color:"#44ffff" },
+    { id:"magenta", label:"M", unit:"%", min:0, max:100, color:"#ff44ff" },
+    { id:"yellow", label:"Y", unit:"%", min:0, max:100, color:"#ffff44" },
+    { id:"white", label:"W", unit:"%", min:0, max:100, color:"#eeeedd" },
+    { id:"colorwheel", label:"Color", unit:"slot", min:0, max:16, color:"#ff88cc" },
+  ]},
+  { group:"BEAM", color:"#ffaa44", params:[
+    { id:"zoom", label:"Zoom", unit:"\u00B0", min:5, max:60, color:"#ffaa44" },
+    { id:"iris", label:"Iris", unit:"%", min:0, max:100, color:"#ffbb55" },
+    { id:"focus", label:"Focus", unit:"%", min:0, max:100, color:"#ffcc66" },
+  ]},
+  { group:"BLADES", color:"#aa66ff", params:[
+    { id:"blade_a", label:"Blade A", unit:"%", min:0, max:100, color:"#aa66ff" },
+    { id:"blade_b", label:"Blade B", unit:"%", min:0, max:100, color:"#bb77ff" },
+    { id:"blade_c", label:"Blade C", unit:"%", min:0, max:100, color:"#cc88ff" },
+    { id:"blade_d", label:"Blade D", unit:"%", min:0, max:100, color:"#dd99ff" },
+    { id:"blade_rot", label:"Blade Rot", unit:"°", min:0, max:360, color:"#ee99ff" },
+  ]},
+  { group:"GOBO", color:"#44ffaa", params:[
+    { id:"gobo_a", label:"Gobo A", unit:"slot", min:0, max:8, color:"#44ffaa" },
+    { id:"gobo_a_rot", label:"Gobo A Rot", unit:"\u00B0", min:0, max:360, color:"#66ffbb" },
+    { id:"gobo_b", label:"Gobo B", unit:"slot", min:0, max:8, color:"#88ffcc" },
+    { id:"gobo_b_rot", label:"Gobo B Rot", unit:"\u00B0", min:0, max:360, color:"#aaffdd" },
+  ]},
+];
+
+const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
+const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
+
+const FIXTURES = [
+  { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
+  { id:2, name:"Spot 2",    color:"#ff5544", type:"SPOT"   },
+  { id:3, name:"Wash 1",    color:"#44aaff", type:"WASH"   },
+  { id:4, name:"Wash 2",    color:"#44aaff", type:"WASH"   },
+  { id:5, name:"Strobe 1",  color:"#ffdd44", type:"STROBE" },
+  { id:6, name:"LED Bar 1", color:"#aa44ff", type:"LED"    },
+  { id:7, name:"LED Bar 2", color:"#aa44ff", type:"LED"    },
+  { id:8, name:"Fog",       color:"#44ffaa", type:"FX"     },
+];
+
+const BEAT_WIDTH=40, LANE_H=34, FIXTURE_HDR_H=28, GROUP_HDR_H=20, RULER_H=36, LABEL_W=130, PARAM_LABEL_W=100, TOTAL_BEATS=64;
+function genId() { return Math.random().toString(36).substr(2,9); }
+
+function interpolateCue(cue, beat) {
+  const t = Math.max(0, Math.min(1, (beat - cue.beat) / cue.duration));
+  const easeFn = EASINGS[cue.easing || "linear"].fn;
+  const fadeIn = cue.fadeIn || 0, fadeOut = cue.fadeOut || 0;
+  const param = getParam(cue.param);
+  const startVal = cue.startValue !== undefined ? cue.startValue : param.min;
+  const endVal = cue.endValue !== undefined ? cue.endValue : cue.value;
+  if (fadeIn > 0 && t < fadeIn) return startVal + easeFn(t/fadeIn) * (cue.value - startVal);
+  if (fadeOut > 0 && t > (1-fadeOut)) return cue.value + easeFn((t-(1-fadeOut))/fadeOut) * (endVal - cue.value);
+  return cue.value;
+}
+
+function buildCurvePath(cue, w, h) {
+  const steps = Math.max(4, Math.floor(w/4));
+  const easeFn = EASINGS[cue.easing || "linear"].fn;
+  const fadeIn = cue.fadeIn||0, fadeOut = cue.fadeOut||0;
+  const param = getParam(cue.param);
+  const startVal = cue.startValue !== undefined ? cue.startValue : param.min;
+  const endVal = cue.endValue !== undefined ? cue.endValue : param.min;
+  const range = param.max - param.min;
+  const pts = Array.from({length:steps+1}, (_,i) => {
+    const t = i/steps;
+    let val;
+    if (fadeIn>0 && t<fadeIn) val = startVal + easeFn(t/fadeIn)*(cue.value-startVal);
+    else if (fadeOut>0 && t>1-fadeOut) val = cue.value + easeFn((t-(1-fadeOut))/fadeOut)*(endVal-cue.value);
+    else val = cue.value;
+    const norm = range>0 ? (val-param.min)/range : 0.5;
+    return `${(t*w).toFixed(1)},${(h-norm*h).toFixed(1)}`;
+  });
+  return `M ${pts.join(" L ")}`;
+}
+
+function CurvePath({ cue, w, h, color, isActive }) {
+  const path = useMemo(() => buildCurvePath(cue, w, h), [cue.easing, cue.fadeIn, cue.fadeOut, cue.value, cue.startValue, cue.endValue, w, h]);
+  return (
+    <svg style={{position:"absolute",top:0,left:0,width:w,height:h,pointerEvents:"none",overflow:"visible"}}>
+      <path d={`${path} L ${w},${h} L 0,${h} Z`} fill={color+"18"} />
+      <path d={path} fill="none" stroke={isActive ? color+"cc" : color+"66"} strokeWidth={isActive?1.5:1} />
+      {(cue.fadeIn||0)>0 && <line x1={cue.fadeIn*w} y1={0} x2={cue.fadeIn*w} y2={h} stroke={color+"55"} strokeWidth={1} strokeDasharray="2,2"/>}
+      {(cue.fadeOut||0)>0 && <line x1={(1-cue.fadeOut)*w} y1={0} x2={(1-cue.fadeOut)*w} y2={h} stroke={color+"55"} strokeWidth={1} strokeDasharray="2,2"/>}
+    </svg>
+  );
+}
+
+const EFFECT_TYPES = [
+  { id:"chase", label:"Chase", icon:"\u21C6", desc:"Sequential across fixtures" },
+  { id:"sine", label:"Sine", icon:"\u223F", desc:"Smooth oscillation" },
+  { id:"rampUp", label:"Ramp Up", icon:"\u2197", desc:"Fade min to max" },
+  { id:"rampDown", label:"Ramp Down", icon:"\u2198", desc:"Fade max to min" },
+  { id:"pulse", label:"Pulse", icon:"\u2022", desc:"Short burst on/off" },
+  { id:"strobe", label:"Strobe", icon:"\u26A1", desc:"Rapid on/off" },
+  { id:"random", label:"Random", icon:"\u2684", desc:"Random values per beat" },
+  { id:"fan", label:"Fan", icon:"\u2261", desc:"Spread values across fixtures" },
+  { id:"ballyhoo", label:"Ballyhoo", icon:"\u27F3", desc:"Circular pan+tilt motion" },
+];
+
+function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade, rangeMin, rangeMax, easing, startBeat, endBeat }) {
+  const cues = [];
+  const dur = endBeat - startBeat;
+  const n = fixtures.length;
+  if (n === 0 || dur <= 0) return cues;
+  const param = getParam(paramId);
+  const lo = rangeMin ?? param.min, hi = rangeMax ?? param.max;
+  const batchId = genId();
+
+  const spread = offset / 100;
+
+  const xf = (crossfade || 0) / 100;
+
+  if (effectType === "chase") {
+    const slotDur = dur / n;
+    const xfadeDur = xf * slotDur;
+    fixtures.forEach((fx, fi) => {
+      const slotStart = startBeat + fi * slotDur;
+      const b = Math.max(startBeat, slotStart - xfadeDur / 2);
+      const cueDur = Math.min(slotDur + xfadeDur, endBeat - b);
+      const fadeIn = xfadeDur > 0 ? (xfadeDur / 2) / cueDur : 0.15;
+      const fadeOut = xfadeDur > 0 ? (xfadeDur / 2) / cueDur : 0.15;
+      cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:cueDur, value:hi, easing:easing||"linear", fadeIn, fadeOut, startValue:lo, endValue:lo });
+    });
+  } else if (effectType === "sine") {
+    const totalSteps = Math.max(8, Math.round(dur * 2));
+    const stepDur = dur / totalSteps;
+    fixtures.forEach((fx, fi) => {
+      const phaseOff = spread * (fi / n) * 2 * Math.PI;
+      for (let s = 0; s < totalSteps; s++) {
+        const b = startBeat + s * stepDur;
+        const phase = (s / totalSteps) * 2 * Math.PI + phaseOff;
+        const nextPhase = ((s + 1) / totalSteps) * 2 * Math.PI + phaseOff;
+        const val = Math.round(lo + (hi - lo) * (0.5 - 0.5 * Math.cos(phase)));
+        const nextVal = Math.round(lo + (hi - lo) * (0.5 - 0.5 * Math.cos(nextPhase)));
+        cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:stepDur, value:val, easing:"linear", fadeIn:0, fadeOut:0, startValue:val, endValue:nextVal });
+      }
+    });
+  } else if (effectType === "rampUp") {
+    const slotDur = dur / n;
+    const xfadeDur = xf * slotDur;
+    fixtures.forEach((fx, fi) => {
+      const slotStart = startBeat + fi * slotDur;
+      const b = Math.max(startBeat, slotStart - xfadeDur / 2);
+      const cueDur = Math.min(slotDur + xfadeDur, endBeat - b);
+      cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:cueDur, value:hi, easing:easing||"linear", fadeIn:1, fadeOut:0, startValue:lo, endValue:hi });
+    });
+  } else if (effectType === "rampDown") {
+    const slotDur = dur / n;
+    const xfadeDur = xf * slotDur;
+    fixtures.forEach((fx, fi) => {
+      const slotStart = startBeat + fi * slotDur;
+      const b = Math.max(startBeat, slotStart - xfadeDur / 2);
+      const cueDur = Math.min(slotDur + xfadeDur, endBeat - b);
+      cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:cueDur, value:lo, easing:easing||"linear", fadeIn:1, fadeOut:0, startValue:hi, endValue:lo });
+    });
+  } else if (effectType === "pulse") {
+    const cycleLen = speed;
+    const pulseDur = Math.min(cycleLen * 0.4, 0.5);
+    fixtures.forEach((fx, fi) => {
+      const phaseOff = spread * (fi / n) * cycleLen;
+      for (let cycle = 0; cycle * cycleLen < dur; cycle++) {
+        const t = cycle * cycleLen + phaseOff;
+        const b = startBeat + (t % dur);
+        if (b >= startBeat && b + pulseDur <= endBeat) cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:pulseDur, value:hi, easing:easing||"easeOut", fadeIn:0.05, fadeOut:0.6, startValue:lo, endValue:lo });
+      }
+    });
+  } else if (effectType === "strobe") {
+    const strobeDur = 0.125;
+    const gap = Math.max(0.125, speed / 8);
+    fixtures.forEach((fx, fi) => {
+      const phaseOff = spread * (fi / n) * gap;
+      for (let cycle = 0; cycle * gap < dur; cycle++) {
+        const t = cycle * gap + phaseOff;
+        const b = startBeat + (t % dur);
+        if (b >= startBeat && b + strobeDur <= endBeat) cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:strobeDur, value:hi, easing:"step", fadeIn:0, fadeOut:0, startValue:lo, endValue:lo });
+      }
+    });
+  } else if (effectType === "random") {
+    const stepDur = speed / 4;
+    fixtures.forEach((fx) => {
+      for (let t = 0; t < dur; t += stepDur) {
+        const b = startBeat + t;
+        const val = Math.round(lo + Math.random() * (hi - lo));
+        if (b + stepDur <= endBeat) cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:b, duration:stepDur, value:val, easing:easing||"step", fadeIn:0, fadeOut:0, startValue:val, endValue:val });
+      }
+    });
+  } else if (effectType === "fan") {
+    fixtures.forEach((fx, fi) => {
+      const val = n > 1 ? Math.round(lo + (hi - lo) * fi / (n - 1)) : Math.round((lo + hi) / 2);
+      cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:startBeat, duration:dur, value:val, easing:"linear", fadeIn:0, fadeOut:0, startValue:val, endValue:val });
+    });
+  } else if (effectType === "ballyhoo") {
+    const cycleLen = speed;
+    const steps = 8;
+    const stepDur = cycleLen / steps;
+    const panParam = getParam("pan"), tiltParam = getParam("tilt");
+    const panLo = panParam.min, panHi = panParam.max, panMid = (panLo + panHi) / 2, panR = (panHi - panLo) * 0.3;
+    const tiltLo = tiltParam.min, tiltHi = tiltParam.max, tiltMid = (tiltLo + tiltHi) / 2, tiltR = (tiltHi - tiltLo) * 0.3;
+    fixtures.forEach((fx, fi) => {
+      const phaseOff = spread * (fi / n) * cycleLen;
+      for (let t = 0; t < dur; t += stepDur) {
+        const b = startBeat + t;
+        const phase = ((t + phaseOff) / cycleLen) * Math.PI * 2;
+        const panVal = Math.round(panMid + panR * Math.cos(phase));
+        const tiltVal = Math.round(tiltMid + tiltR * Math.sin(phase));
+        const nextPhase = ((t + stepDur + phaseOff) / cycleLen) * Math.PI * 2;
+        if (b + stepDur <= endBeat) {
+          cues.push({ id:genId(), batchId, fixtureId:fx.id, param:"pan", beat:b, duration:stepDur, value:panVal, easing:"linear", fadeIn:0, fadeOut:0, startValue:panVal, endValue:Math.round(panMid + panR * Math.cos(nextPhase)) });
+          cues.push({ id:genId(), batchId, fixtureId:fx.id, param:"tilt", beat:b, duration:stepDur, value:tiltVal, easing:"linear", fadeIn:0, fadeOut:0, startValue:tiltVal, endValue:Math.round(tiltMid + tiltR * Math.sin(nextPhase)) });
+        }
+      }
+    });
+  }
+  return cues;
+}
+
+function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
+  const [selFixtures, setSelFixtures] = useState(new Set([1,2,3,4]));
+  const [paramId, setParamId] = useState("dimmer");
+  const [effectType, setEffectType] = useState("chase");
+  const [speed, setSpeed] = useState(4);
+  const [offset, setOffset] = useState(100);
+  const [easing, setEasing] = useState("linear");
+  const [crossfade, setCrossfade] = useState(0);
+  const [direction, setDirection] = useState("fwd");
+  const [lastBatchId, setLastBatchId] = useState(null);
+  const param = getParam(paramId);
+
+  const toggleFx = id => setSelFixtures(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const selAll = () => setSelFixtures(new Set(FIXTURES.map(f => f.id)));
+  const selNone = () => setSelFixtures(new Set());
+
+  const handleApply = () => {
+    let fixtures = FIXTURES.filter(f => selFixtures.has(f.id));
+    if (direction === "bwd") fixtures = [...fixtures].reverse();
+    const newCues = generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade, rangeMin: param.min, rangeMax: param.max, easing, startBeat: fxStart, endBeat: fxEnd });
+    if (newCues.length === 0) return;
+    const bid = newCues[0].batchId;
+    setLastBatchId(bid);
+    setCues(prev => [...prev, ...newCues]);
+    setExpandedFixtures(new Set(fixtures.map(f => f.id)));
+    const groupName = PARAM_GROUPS.find(g => g.params.some(p => p.id === paramId))?.group;
+    if (groupName) setExpandedGroups(new Set(fixtures.map(f => `${f.id}-${groupName}`)));
+  };
+
+  const handleUndo = () => {
+    if (!lastBatchId) return;
+    setCues(prev => prev.filter(c => c.batchId !== lastBatchId));
+    setLastBatchId(null);
+  };
+
+  const isBallyhoo = effectType === "ballyhoo";
+
+  return (
+    <div style={{padding:8,display:"flex",flexDirection:"column",gap:8,fontSize:9}}>
+      <div>
+        <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>FIXTURES</div>
+        <div style={{display:"flex",gap:2,marginBottom:4}}>
+          <button onClick={selAll} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>ALL</button>
+          <button onClick={selNone} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>NONE</button>
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+          {FIXTURES.map(fx => {
+            const sel = selFixtures.has(fx.id);
+            return <button key={fx.id} onClick={()=>toggleFx(fx.id)} style={{padding:"2px 5px",fontSize:8,background:sel?fx.color+"22":"#0c0e12",border:`1px solid ${sel?fx.color:"#252930"}`,color:sel?fx.color:"#444",borderRadius:3,cursor:"pointer",fontWeight:sel?"bold":"normal"}}>{fx.name}</button>;
+          })}
+        </div>
+      </div>
+
+      {!isBallyhoo && <div>
+        <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>PARAMETER</div>
+        <select value={paramId} onChange={e=>setParamId(e.target.value)} style={{width:"100%",background:"#0c0e12",border:"1px solid #252930",color:"#e8aa22",borderRadius:3,padding:"3px 5px",fontSize:10}}>
+          {PARAM_GROUPS.map(g => <optgroup key={g.group} label={g.group}>{g.params.map(p => <option key={p.id} value={p.id}>{p.label} ({p.unit})</option>)}</optgroup>)}
+        </select>
+      </div>}
+
+      <div>
+        <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>EFFECT</div>
+        <div style={{display:"flex",flexDirection:"column",gap:2}}>
+          {EFFECT_TYPES.map(et => (
+            <button key={et.id} onClick={()=>setEffectType(et.id)} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 6px",background:effectType===et.id?"#e8aa2218":"#0c0e12",border:`1px solid ${effectType===et.id?"#e8aa22":"#1e222a"}`,color:effectType===et.id?"#e8aa22":"#666",borderRadius:3,cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:12,width:16,textAlign:"center"}}>{et.icon}</span>
+              <span style={{fontWeight:effectType===et.id?"bold":"normal"}}>{et.label}</span>
+              <span style={{marginLeft:"auto",fontSize:7,color:"#444"}}>{et.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
+        <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>PARAMETERS</div>
+        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+          <div>
+            <span style={{fontSize:8,color:"#555"}}>SPEED (beats/cycle)</span>
+            <div style={{display:"flex",gap:3,marginTop:2}}>
+              {[0.5,1,2,4,8,16].map(v => <button key={v} onClick={()=>setSpeed(v)} style={{flex:1,padding:"2px 0",fontSize:8,background:speed===v?"#e8aa2233":"#0c0e12",border:`1px solid ${speed===v?"#e8aa22":"#252930"}`,color:speed===v?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{v}</button>)}
+            </div>
+          </div>
+          <div>
+            <span style={{fontSize:8,color:"#555"}}>SPREAD ({offset}% {"\u00B7"} {selFixtures.size}fx)</span>
+            <input type="range" min={0} max={100} value={offset} onChange={e=>setOffset(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22"}}/>
+          </div>
+          <div>
+            <span style={{fontSize:8,color:"#555"}}>DIRECTION</span>
+            <div style={{display:"flex",gap:2,marginTop:2}}>
+              {[{id:"fwd",label:"\u25B6 FWD",desc:"1,2,3..."},{id:"bwd",label:"\u25C0 BWD",desc:"...3,2,1"}].map(d=>(
+                <button key={d.id} onClick={()=>setDirection(d.id)} style={{flex:1,padding:"3px 5px",fontSize:8,background:direction===d.id?"#252a34":"#0c0e12",border:`1px solid ${direction===d.id?"#e8aa22":"#252930"}`,color:direction===d.id?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{d.label} <span style={{color:direction===d.id?"#e8aa2288":"#333",fontSize:7}}>{d.desc}</span></button>
+              ))}
+            </div>
+          </div>
+          {(effectType==="chase"||effectType==="rampUp"||effectType==="rampDown")&&<div>
+            <span style={{fontSize:8,color:"#555"}}>CROSSFADE ({crossfade}%)</span>
+            <input type="range" min={0} max={100} value={crossfade} onChange={e=>setCrossfade(+e.target.value)} style={{width:"100%",accentColor:"#44ffaa"}}/>
+          </div>}
+          {!isBallyhoo && <div>
+            <span style={{fontSize:8,color:"#555"}}>EASING</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:2,marginTop:2}}>
+              {Object.entries(EASINGS).map(([k,def]) => <button key={k} onClick={()=>setEasing(k)} style={{padding:"2px 5px",fontSize:8,background:easing===k?"#252a34":"#0c0e12",border:`1px solid ${easing===k?"#e8aa22":"#252930"}`,color:easing===k?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{def.icon} {def.label}</button>)}
+            </div>
+          </div>}
+          <div style={{fontSize:8,color:"#bb44ff88",letterSpacing:2}}>FX RANGE: {fxStart} → {fxEnd} <span style={{color:"#bb44ff55"}}>(drag purple markers)</span></div>
+        </div>
+      </div>
+
+      <button onClick={handleApply} style={{padding:"6px 0",background:"#e8aa2233",border:"2px solid #e8aa22",color:"#e8aa22",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",letterSpacing:2}}>APPLY FX</button>
+      {lastBatchId && <button onClick={handleUndo} style={{padding:"4px 0",background:"#ff333318",border:"1px solid #ff333366",color:"#ff5544",borderRadius:3,cursor:"pointer",fontSize:9,letterSpacing:1}}>UNDO LAST FX</button>}
+    </div>
+  );
+}
+
+const SEQ_CATS = PARAM_GROUPS.map(g=>({
+  id:g.group,
+  label:{INTENSITY:"DIM",POSITION:"POS",COLOR:"COL",BEAM:"BEAM",BLADES:"BLDE",GOBO:"GOBO"}[g.group],
+  color:g.color
+}));
+
+function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId }) {
+  const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
+  const slots = sequenceStorage[seqCategory]||[];
+
+  const handleClick = (i) => {
+    if(seqStoreMode){
+      const src = selectedCues&&selectedCues.size>0 ? cues.filter(c=>selectedCues.has(c.id)) : [...cues];
+      if(src.length===0) return;
+      const stored = { label:"S."+String(i+1).padStart(2,"0"), cues:src.map(c=>({...c,id:null,batchId:null})), storedAt:Date.now(), cueCount:src.length, color:cat.color };
+      setSequenceStorage(prev=>{const n={...prev};n[seqCategory]=[...prev[seqCategory]];n[seqCategory][i]=stored;return n;});
+      setSeqStoreMode(false);
+    } else if(seqClearMode){
+      if(!slots[i]) return;
+      setSequenceStorage(prev=>{const n={...prev};n[seqCategory]=[...prev[seqCategory]];n[seqCategory][i]=null;return n;});
+      setSeqClearMode(false);
+    } else {
+      if(!slots[i]) return;
+      const bid = genId();
+      const recalled = slots[i].cues.map(c=>({...c,id:genId(),batchId:bid}));
+      if(seqRecallMode==="replace") setCues(recalled);
+      else setCues(prev=>[...prev,...recalled]);
+      setLastRecalledBatchId(bid);
+    }
+  };
+
+  const totalStored = Object.values(sequenceStorage).reduce((a,arr)=>a+arr.filter(Boolean).length,0);
+
+  return (
+    <div style={{padding:8,display:"flex",flexDirection:"column",gap:6,height:"100%"}}>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <button onClick={()=>{setSeqStoreMode(!seqStoreMode);setSeqClearMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqStoreMode?"#2a1a00":"#0c0e12",border:seqStoreMode?"1px solid #e8aa22":"1px solid #252930",color:seqStoreMode?"#e8aa22":"#555",borderRadius:3,cursor:"pointer",animation:seqStoreMode?"seqstore 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>● STORE</button>
+        <button onClick={()=>{setSeqClearMode(!seqClearMode);setSeqStoreMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqClearMode?"#1c0f0f":"#0c0e12",border:seqClearMode?"1px solid #ff5544":"1px solid #252930",color:seqClearMode?"#ff5544":"#555",borderRadius:3,cursor:"pointer",animation:seqClearMode?"seqclear 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>✖ CLEAR</button>
+        <button onClick={()=>setSeqRecallMode(seqRecallMode==="merge"?"replace":"merge")} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0c0e12",border:"1px solid #252930",color:seqRecallMode==="merge"?"#44aaff":"#ff8844",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>{seqRecallMode==="merge"?"MERGE":"REPLACE"}</button>
+      </div>
+      <div style={{display:"flex",gap:1,background:"#0c0e12",borderRadius:3,overflow:"hidden"}}>
+        {SEQ_CATS.map(c=>(
+          <button key={c.id} onClick={()=>{setSeqCategory(c.id);setSeqStoreMode(false);setSeqClearMode(false);}} style={{flex:1,padding:"4px 0",fontSize:7,letterSpacing:0.5,background:seqCategory===c.id?"#1c2030":"transparent",border:"none",borderBottom:seqCategory===c.id?`2px solid ${c.color}`:"2px solid transparent",color:seqCategory===c.id?c.color:"#3a3f4c",cursor:"pointer",fontWeight:seqCategory===c.id?"bold":"normal"}}>{c.label}</button>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(10,1fr)",gap:2,flex:1}}>
+        {Array.from({length:100},(_,i)=>{
+          const slot=slots[i];
+          const isLastRecalled=slot&&lastRecalledBatchId&&slot.cues.length>0;
+          const occupied=!!slot;
+          return (
+            <button key={i} onClick={()=>handleClick(i)} title={occupied?`${slot.label} — ${slot.cueCount} cues`:`Slot ${i+1} — empty`} style={{
+              position:"relative",
+              background: seqStoreMode ? "#1a1500" : (occupied ? `${cat.color}18` : "#0c0e12"),
+              border: seqStoreMode ? "1px solid #e8aa2244" : (seqClearMode&&occupied ? "1px solid #ff554466" : (occupied ? `1px solid ${cat.color}55` : "1px solid #1a1e26")),
+              color: occupied ? cat.color : (seqStoreMode ? "#e8aa2244" : "#1e2028"),
+              borderRadius: 2,
+              cursor: (seqStoreMode || (occupied && !seqClearMode) || (occupied && seqClearMode)) ? "pointer" : "default",
+              fontSize: 7,
+              fontWeight: occupied ? "bold" : "normal",
+              padding: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 18,
+              overflow: "hidden",
+              transition: "all 0.15s",
+            }}>
+              <span style={{lineHeight:1}}>{String(i+1).padStart(2,"0")}</span>
+              {occupied&&<div style={{position:"absolute",bottom:0,left:0,right:0,height:2,background:cat.color,opacity:0.6}}/>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{fontSize:8,color:"#3a3f4c",textAlign:"center",paddingTop:2}}>
+        {slots.filter(Boolean).length} / 100 stored{seqStoreMode?" — click slot to store":seqClearMode?" — click slot to clear":""}
+      </div>
+    </div>
+  );
+}
+
+const defaultCues = [
+  {id:genId(),fixtureId:1,param:"dimmer",beat:0,duration:4,value:100,easing:"easeIn",fadeIn:0.3,fadeOut:0.2,startValue:0,endValue:0},
+  {id:genId(),fixtureId:1,param:"dimmer",beat:8,duration:2,value:80,easing:"linear",fadeIn:0,fadeOut:0,startValue:0,endValue:0},
+  {id:genId(),fixtureId:1,param:"pan",beat:0,duration:8,value:270,easing:"sCurve",fadeIn:0.5,fadeOut:0.5,startValue:180,endValue:180},
+  {id:genId(),fixtureId:1,param:"tilt",beat:2,duration:4,value:90,easing:"easeOut",fadeIn:0.4,fadeOut:0,startValue:45,endValue:45},
+  {id:genId(),fixtureId:1,param:"cyan",beat:4,duration:4,value:80,easing:"linear",fadeIn:0.2,fadeOut:0.2,startValue:0,endValue:0},
+  {id:genId(),fixtureId:2,param:"dimmer",beat:4,duration:4,value:100,easing:"easeIn",fadeIn:0.3,fadeOut:0.3,startValue:0,endValue:0},
+  {id:genId(),fixtureId:2,param:"magenta",beat:0,duration:8,value:60,easing:"sCurve",fadeIn:0.3,fadeOut:0.3,startValue:0,endValue:0},
+  {id:genId(),fixtureId:3,param:"dimmer",beat:0,duration:8,value:75,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:0,endValue:0},
+  {id:genId(),fixtureId:3,param:"zoom",beat:0,duration:16,value:30,easing:"sCurve",fadeIn:0.2,fadeOut:0.2,startValue:5,endValue:5},
+  {id:genId(),fixtureId:5,param:"strobe",beat:12,duration:2,value:10,easing:"step",fadeIn:0,fadeOut:0,startValue:0,endValue:0},
+  {id:genId(),fixtureId:6,param:"dimmer",beat:0,duration:16,value:60,easing:"easeIn",fadeIn:0.2,fadeOut:0.3,startValue:0,endValue:0},
+  {id:genId(),fixtureId:6,param:"yellow",beat:4,duration:8,value:100,easing:"bounce",fadeIn:0.4,fadeOut:0,startValue:0,endValue:0},
+];
+
+function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
+  const [activeParam, setActiveParam] = useState("dimmer");
+  const [mode, setMode] = useState(null);
+  const [heldPads, setHeldPads] = useState(new Set());
+  const [padValues, setPadValues] = useState(() => { const m={}; FIXTURES.forEach(fx=>{m[fx.id]=100;}); return m; });
+  const [quantize, setQuantize] = useState(false);
+  const param = getParam(activeParam);
+  const pressStart = useRef({});
+  const lastBeatTimeRef = useRef(0);
+
+  useEffect(() => {
+    if (mode !== "rec" || !audioMode || audioMode === "none" || !beatEventRef?.current) return;
+    const check = () => {
+      const evt = beatEventRef.current;
+      if (evt && evt.time > lastBeatTimeRef.current) {
+        lastBeatTimeRef.current = evt.time;
+        FIXTURES.forEach(fx => {
+          if (heldPads.has(fx.id)) {
+            const val = padValues[fx.id] ?? Math.round((param.min+param.max)/2);
+            setCues(prev => [...prev, {id:genId(),fixtureId:fx.id,param:activeParam,beat:evt.beat,duration:0.5,value:val,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:param.min,endValue:param.min}]);
+          }
+        });
+      }
+    };
+    const iv = setInterval(check, 50);
+    return () => clearInterval(iv);
+  }, [mode, audioMode, heldPads, padValues, activeParam, param, setCues, beatEventRef]);
+
+  const dimmerLive = useMemo(() => {
+    const m={};
+    cues.forEach(c => { if(c.param==="dimmer"&&playhead>=c.beat&&playhead<c.beat+c.duration) m[c.fixtureId]=interpolateCue(c,playhead)/100; });
+    return m;
+  }, [cues, playhead]);
+
+  const paramLive = useMemo(() => {
+    const m={};
+    cues.forEach(c => { if(c.param===activeParam&&playhead>=c.beat&&playhead<c.beat+c.duration) m[c.fixtureId]=interpolateCue(c,playhead); });
+    return m;
+  }, [cues, playhead, activeParam]);
+
+  const hasCueForParam = fxId => cues.some(c => c.fixtureId===fxId && c.param===activeParam);
+  const isActiveCue = fxId => cues.some(c => c.fixtureId===fxId && c.param===activeParam && playhead>=c.beat && playhead<c.beat+c.duration);
+
+  const handlePadPress = fxId => {
+    setHeldPads(prev => new Set([...prev, fxId]));
+    if (mode==="rec") {
+      const rawBeat = playheadRef.current;
+      const beatSnap = quantize ? Math.round(rawBeat*4)/4 : rawBeat;
+      const val = padValues[fxId] ?? Math.round((param.min+param.max)/2);
+      const cueId = genId();
+      pressStart.current[fxId] = { beat:beatSnap, cueId };
+      setCues(prev => {
+        const filtered = prev.filter(c => !(c.fixtureId===fxId&&c.param===activeParam&&rawBeat>=c.beat&&rawBeat<c.beat+c.duration));
+        return [...filtered, {id:cueId,fixtureId:fxId,param:activeParam,beat:beatSnap,duration:0.25,value:val,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:param.min,endValue:param.min}];
+      });
+    }
+    if (mode==="erase") {
+      const rawBeat = playheadRef.current;
+      setCues(prev => prev.filter(c => !(c.fixtureId===fxId&&c.param===activeParam&&rawBeat>=c.beat&&rawBeat<c.beat+c.duration)));
+    }
+  };
+
+  const handlePadRelease = fxId => {
+    setHeldPads(prev => { const s=new Set(prev); s.delete(fxId); return s; });
+    if (mode==="rec" && pressStart.current[fxId]) {
+      const {beat:startBeat, cueId} = pressStart.current[fxId];
+      const finalDur = Math.max(0.25, playheadRef.current - startBeat);
+      setCues(prev => prev.map(c => c.id===cueId ? {...c, duration:finalDur} : c));
+      delete pressStart.current[fxId];
+    }
+  };
+
+  const WW=44, WH=88, GAP=22;
+  const blackAfter = new Set([0,1,3,4,5]);
+  const totalW = FIXTURES.length*(WW+GAP)-GAP+10;
+
+  return (
+    <div style={{background:"#0b0d11",borderTop:"2px solid #252930",flexShrink:0}}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}@keyframes recglow{0%,100%{box-shadow:0 0 8px #ff220066}50%{box-shadow:0 0 18px #ff2200bb}}`}</style>
+      <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid #1a1d22",padding:"4px 10px",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:7,color:"#3a3f4c",letterSpacing:2}}>PARAM:</div>
+        <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
+          {PARAM_GROUPS.map(group => group.params.map(p => {
+            const isSel = activeParam===p.id;
+            return <button key={p.id} onClick={()=>{setActiveParam(p.id);if(onParamSelect)onParamSelect(p.id,group.group);}} style={{padding:"2px 5px",background:isSel?p.color+"33":"#0f1115",border:"1px solid "+(isSel?p.color:"#252930"),borderRadius:3,cursor:"pointer",fontSize:9,color:isSel?p.color:"#444",fontWeight:isSel?"bold":"normal"}}>{p.label}</button>;
+          }))}
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button onClick={()=>setMode(m=>m==="rec"?null:"rec")} style={{padding:"4px 12px",background:mode==="rec"?"#ff2200":"#1a0a08",border:"2px solid "+(mode==="rec"?"#ff4422":"#3a1a14"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="rec"?"#fff":"#663322",boxShadow:mode==="rec"?"0 0 16px #ff220099":"none"}}>{mode==="rec"?"\u23FA REC":"\u23FA REC"}</button>
+          <button onClick={()=>setMode(m=>m==="erase"?null:"erase")} style={{padding:"4px 12px",background:mode==="erase"?"#882200":"#100808",border:"2px solid "+(mode==="erase"?"#ff6600":"#2a1a10"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="erase"?"#ffaa44":"#443322"}}>{mode==="erase"?"\u2716 ERASE":"\u2716 ERASE"}</button>
+          <button onClick={()=>setQuantize(q=>!q)} style={{padding:"4px 12px",background:quantize?"#162030":"#0c0f14",border:"2px solid "+(quantize?"#4488ff":"#252930"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:quantize?"#4488ff":"#333"}}>{"\u266A"} {quantize?"QUANT":"FREE"}</button>
+        </div>
+      </div>
+      <div style={{padding:"16px 10px 8px",overflowX:"auto"}}>
+        <div style={{position:"relative",width:totalW,height:WH+20}}>
+          {FIXTURES.map((fx,idx) => {
+            const isHeld=heldPads.has(fx.id);
+            const dimVal=dimmerLive[fx.id]||0;
+            const liveVal=paramLive[fx.id];
+            const hasParam=hasCueForParam(fx.id);
+            const isActive=isActiveCue(fx.id);
+            const padVal=padValues[fx.id]??param.max;
+            const fillPct=isActive?Math.max(0,Math.min(1,(liveVal-param.min)/Math.max(1,param.max-param.min))):(padVal-param.min)/Math.max(1,param.max-param.min);
+            const glowStr=isActive?(0.3+dimVal*0.7):0;
+            const x=idx*(WW+GAP);
+            const keyBg=isHeld?`linear-gradient(180deg,${fx.color}dd,${fx.color}88)`:isActive?`linear-gradient(180deg,#e8eaf0 0%,#d0d4de ${(1-fillPct)*100}%,${fx.color}aa ${(1-fillPct)*100}%,${fx.color}77 100%)`:`linear-gradient(180deg,#d4d8e0,#aeb4c0)`;
+            return (
+              <div key={fx.id} style={{position:"absolute",left:x,top:0,width:WW}}>
+                <div onMouseDown={()=>handlePadPress(fx.id)} onMouseUp={()=>handlePadRelease(fx.id)} onMouseLeave={()=>handlePadRelease(fx.id)}
+                  style={{width:WW,height:WH,borderRadius:"3px 3px 8px 8px",background:keyBg,border:isHeld?`2px solid ${fx.color}`:isActive?`1px solid ${fx.color}bb`:"1px solid #7a7e8a",boxShadow:isHeld?`0 0 22px ${fx.color}bb,0 4px 0 #000`:isActive?`0 0 ${10+glowStr*18}px ${fx.color}77,0 6px 0 #111`:"0 6px 0 #111",cursor:mode?"pointer":"default",position:"relative",overflow:"hidden",transform:isHeld?"translateY(3px)":"translateY(0)",transition:isHeld?"none":"all 0.06s",userSelect:"none"}}>
+                  <div style={{position:"absolute",top:6,left:"50%",transform:"translateX(-50%)",width:20,height:20,borderRadius:3,background:isActive?fx.color:"rgba(0,0,0,0.18)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:"bold",color:isActive?"#000":"#777"}}>{fx.id}</div>
+                  <div style={{position:"absolute",top:28,left:0,right:0,bottom:18,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <div style={{writingMode:"vertical-lr",transform:"rotate(180deg)",fontSize:9,letterSpacing:1,color:isHeld?"#fff":isActive?"#111":"#555",fontWeight:isActive?"bold":"normal",whiteSpace:"nowrap",overflow:"hidden",maxHeight:40}}>{fx.name}</div>
+                  </div>
+                  <div style={{position:"absolute",bottom:5,left:0,right:0,textAlign:"center",fontSize:8,fontWeight:"bold",color:isActive?"#111":"#666"}}>{isActive&&liveVal!==undefined?Math.round(liveVal):padVal}{param.unit}</div>
+                  {mode==="rec"&&<div style={{position:"absolute",top:4,right:4,width:6,height:6,borderRadius:"50%",background:"#ff2200",animation:"pulse 1s infinite"}}/>}
+                  {mode==="erase"&&hasParam&&<div style={{position:"absolute",top:4,right:4,width:6,height:6,borderRadius:"50%",background:"#ff6600"}}/>}
+                  <div style={{position:"absolute",bottom:0,left:4,right:4,height:3,borderRadius:"0 0 6px 6px",background:isHeld?fx.color+"88":isActive?fx.color+"55":"rgba(0,0,0,0.1)"}}/>
+                </div>
+                <div style={{marginTop:4,height:3,background:"#0c0e12",borderRadius:2,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:isActive?`${fillPct*100}%`:hasParam?"100%":"0%",background:isActive?param.color:param.color+"33",borderRadius:2,transition:"width 0.05s"}}/>
+                </div>
+              </div>
+            );
+          })}
+          {FIXTURES.map((fx,idx) => {
+            if (!blackAfter.has(idx)) return null;
+            return <div key={`bk-${idx}`} style={{position:"absolute",left:idx*(WW+GAP)+WW-12,top:0,width:24,height:54,borderRadius:"2px 2px 5px 5px",background:"linear-gradient(180deg,#1a1a1a,#2e2e2e 60%,#1a1a1a)",border:"1px solid #000",boxShadow:"0 5px 0 #000",zIndex:3,pointerEvents:"none"}}/>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function detectBpmFromBuffer(audioBuffer) {
+  const rawData = audioBuffer.getChannelData(0);
+  const sampleRate = audioBuffer.sampleRate;
+  const downsampleFactor = Math.floor(sampleRate / 11025);
+  const data = [];
+  for (let i = 0; i < rawData.length; i += downsampleFactor) data.push(Math.abs(rawData[i]));
+  const dsRate = sampleRate / downsampleFactor;
+  const hopSize = Math.floor(dsRate * 0.023);
+  const envelope = [];
+  for (let i = 0; i < data.length - hopSize; i += hopSize) {
+    let e = 0;
+    for (let j = 0; j < hopSize; j++) e += data[i + j] * data[i + j];
+    envelope.push(Math.sqrt(e / hopSize));
+  }
+  const diff = envelope.map((v, i) => i === 0 ? 0 : Math.max(0, v - envelope[i - 1]));
+  const minLag = Math.floor(60 / (180 * 0.023));
+  const maxLag = Math.floor(60 / (60 * 0.023));
+  let bestLag = minLag, bestCorr = 0;
+  for (let lag = minLag; lag <= Math.min(maxLag, diff.length - 1); lag++) {
+    let corr = 0;
+    for (let i = 0; i < diff.length - lag; i++) corr += diff[i] * diff[i + lag];
+    if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+  }
+  return Math.round(60 / (bestLag * 0.023));
+}
+
+function useAudioEngine({ bpm, playing, playhead, audioMode, audioVolume, audioMuted, onLevel, onBeat, onFileLoaded }) {
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const gainRef = useRef(null);
+  const bufferSourceRef = useRef(null);
+  const audioBufferRef = useRef(null);
+  const fileStartTimeRef = useRef(0);
+  const fileStartBeatRef = useRef(0);
+  const detectedBpmRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const micSourceRef = useRef(null);
+  const analysisFrameRef = useRef(null);
+  const prevEnergyRef = useRef(0);
+  const beatCooldownRef = useRef(0);
+  const playingRef = useRef(false);
+  const [ctxReady, setCtxReady] = useState(false);
+  playingRef.current = playing;
+
+  const ensureContext = useCallback(() => {
+    if (!audioCtxRef.current) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.8;
+      analyserRef.current = analyser;
+      const gain = ctx.createGain();
+      gain.gain.value = audioVolume;
+      gainRef.current = gain;
+      gain.connect(analyser);
+      analyser.connect(ctx.destination);
+      setCtxReady(true);
+    }
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+    return audioCtxRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (gainRef.current && audioCtxRef.current) {
+      gainRef.current.gain.setValueAtTime(audioMuted ? 0 : audioVolume, audioCtxRef.current.currentTime);
+    }
+  }, [audioVolume, audioMuted]);
+
+  const loadFile = useCallback(async (file) => {
+    const ctx = ensureContext();
+    const arrayBuffer = await file.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(arrayBuffer);
+    audioBufferRef.current = decoded;
+    const rawData = decoded.getChannelData(0);
+    const numPeaks = 2000;
+    const blockSize = Math.floor(rawData.length / numPeaks);
+    const peaks = new Float32Array(numPeaks);
+    for (let i = 0; i < numPeaks; i++) {
+      let max = 0;
+      for (let j = 0; j < blockSize; j++) {
+        const abs = Math.abs(rawData[i * blockSize + j]);
+        if (abs > max) max = abs;
+      }
+      peaks[i] = max;
+    }
+    let detectedBpm = null;
+    try { detectedBpm = detectBpmFromBuffer(decoded); } catch(e) {}
+    detectedBpmRef.current = detectedBpm;
+    const durationBeats = detectedBpm ? (decoded.duration / 60) * detectedBpm : (decoded.duration / 60) * bpm;
+    if (onFileLoaded) onFileLoaded({ buffer: decoded, peaks, durationBeats, detectedBpm, fileName: file.name });
+  }, [bpm, ensureContext, onFileLoaded]);
+
+  const startFilePlayback = useCallback((fromBeat) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx || !audioBufferRef.current) return;
+    if (bufferSourceRef.current) { try { bufferSourceRef.current.stop(); } catch(e){} bufferSourceRef.current.disconnect(); }
+    const source = ctx.createBufferSource();
+    source.buffer = audioBufferRef.current;
+    const detBpm = detectedBpmRef.current;
+    const rate = detBpm ? bpm / detBpm : 1;
+    source.playbackRate.value = rate;
+    source.connect(gainRef.current);
+    const offsetSeconds = detBpm ? Math.max(0, (fromBeat / detBpm) * 60) : Math.max(0, (fromBeat / bpm) * 60);
+    fileStartTimeRef.current = ctx.currentTime;
+    fileStartBeatRef.current = fromBeat;
+    source.start(0, Math.min(offsetSeconds, audioBufferRef.current.duration));
+    bufferSourceRef.current = source;
+  }, [bpm]);
+
+  const stopFilePlayback = useCallback(() => {
+    if (bufferSourceRef.current) { try { bufferSourceRef.current.stop(); } catch(e){} }
+  }, []);
+
+  const seekTo = useCallback((beat) => {
+    if (audioCtxRef.current && audioBufferRef.current && playingRef.current) {
+      if (bufferSourceRef.current) { try { bufferSourceRef.current.stop(); } catch(e){} }
+      startFilePlayback(beat);
+    }
+  }, [startFilePlayback]);
+
+  const getPlaybackBeat = useCallback(() => {
+    if (!audioCtxRef.current || !bufferSourceRef.current) return null;
+    const elapsed = audioCtxRef.current.currentTime - fileStartTimeRef.current;
+    return fileStartBeatRef.current + (elapsed * bpm) / 60;
+  }, [bpm]);
+
+  const startMic = useCallback(async () => {
+    const ctx = ensureContext();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      const source = ctx.createMediaStreamSource(stream);
+      source.connect(analyserRef.current);
+      micSourceRef.current = source;
+    } catch(e) { console.warn('Mic access denied:', e); }
+  }, [ensureContext]);
+
+  const stopMic = useCallback(() => {
+    if (micSourceRef.current) { micSourceRef.current.disconnect(); micSourceRef.current = null; }
+    if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+  }, []);
+
+  useEffect(() => {
+    if (audioMode === 'none') {
+      cancelAnimationFrame(analysisFrameRef.current);
+      return;
+    }
+    if (!analyserRef.current) {
+      ensureContext();
+      return;
+    }
+    const analyser = analyserRef.current;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    const freqArray = new Uint8Array(analyser.frequencyBinCount);
+    const analyse = () => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteTimeDomainData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) { const v = (dataArray[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / dataArray.length);
+      if (onLevel) onLevel(rms);
+      analyserRef.current.getByteFrequencyData(freqArray);
+      let lowEnergy = 0;
+      for (let i = 0; i < 10; i++) lowEnergy += freqArray[i];
+      lowEnergy /= 10;
+      const now = performance.now();
+      if (lowEnergy > prevEnergyRef.current * 1.3 && now > beatCooldownRef.current && lowEnergy > 20) {
+        if (onBeat) onBeat();
+        beatCooldownRef.current = now + (60000 / (bpm || 120)) * 0.4;
+      }
+      prevEnergyRef.current = prevEnergyRef.current * 0.85 + lowEnergy * 0.15;
+      analysisFrameRef.current = requestAnimationFrame(analyse);
+    };
+    analysisFrameRef.current = requestAnimationFrame(analyse);
+    return () => cancelAnimationFrame(analysisFrameRef.current);
+  }, [audioMode, bpm, onLevel, onBeat, ctxReady, ensureContext]);
+
+  useEffect(() => {
+    if (audioMode === 'mic') { ensureContext(); startMic(); }
+    else stopMic();
+    if (audioMode === 'file') ensureContext();
+  }, [audioMode, startMic, stopMic, ensureContext]);
+
+  useEffect(() => {
+    return () => { stopMic(); stopFilePlayback(); };
+  }, []);
+
+  return { loadFile, startFilePlayback, stopFilePlayback, seekTo, getPlaybackBeat, ensureContext };
+}
+
+function WaveformCanvas({ peaks, durationBeats, beatWidth, zoom, scrollLeft, width, height, playhead, loopStart, loopEnd, loopEnabled }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !peaks) return;
+    const ctx = canvas.getContext('2d');
+    canvas.width = width;
+    canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    const totalW = durationBeats * beatWidth * zoom;
+    const peakW = totalW / peaks.length;
+    const startPeak = Math.max(0, Math.floor((scrollLeft / totalW) * peaks.length));
+    const endPeak = Math.min(peaks.length, Math.ceil(((scrollLeft + width) / totalW) * peaks.length));
+    ctx.strokeStyle = '#e8aa2255';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = startPeak; i < endPeak; i++) {
+      const x = (i * peakW) - scrollLeft;
+      const h = peaks[i] * height * 0.9;
+      ctx.moveTo(x, (height - h) / 2);
+      ctx.lineTo(x, (height + h) / 2);
+    }
+    ctx.stroke();
+    if (loopEnabled) {
+      const ls = loopStart * beatWidth * zoom - scrollLeft;
+      const le = loopEnd * beatWidth * zoom - scrollLeft;
+      ctx.fillStyle = 'rgba(68,255,170,0.06)';
+      ctx.fillRect(ls, 0, le - ls, height);
+    }
+    const phX = playhead * beatWidth * zoom - scrollLeft;
+    ctx.fillStyle = '#ff333388';
+    ctx.fillRect(phX - 0.5, 0, 1, height);
+  }, [peaks, durationBeats, beatWidth, zoom, scrollLeft, width, height, playhead, loopStart, loopEnd, loopEnabled]);
+  return <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,width:width,height:height,pointerEvents:'none'}} />;
+}
+
+function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, beatDetected, detectedBpm, audioVolume, setAudioVolume, audioMuted, setAudioMuted, onFileLoad, bpm, setBpm }) {
+  const fileInputRef = useRef(null);
+  return (
+    <div style={{height:30,background:'#12141a',borderBottom:'1px solid #252930',display:'flex',alignItems:'center',padding:'0 14px',gap:8,flexShrink:0}}>
+      <div style={{display:'flex',gap:2}}>
+        {['none','file','mic'].map(mode => (
+          <button key={mode} onClick={()=>setAudioMode(mode)} style={{padding:'2px 8px',fontSize:9,fontWeight:audioMode===mode?'bold':'normal',background:audioMode===mode?'#1e222a':'#0c0e12',border:`1px solid ${audioMode===mode?'#e8aa22':'#252930'}`,color:audioMode===mode?'#e8aa22':'#555',borderRadius:3,cursor:'pointer',letterSpacing:1}}>{mode.toUpperCase()}</button>
+        ))}
+      </div>
+      <div style={{width:1,height:18,background:'#252930'}}/>
+      {audioMode==='file'&&<>
+        <input ref={fileInputRef} type="file" accept="audio/*" onChange={e=>e.target.files[0]&&onFileLoad(e.target.files[0])} style={{display:'none'}}/>
+        <button onClick={()=>fileInputRef.current.click()} style={{padding:'2px 10px',fontSize:9,background:'#0c0e12',border:'1px solid #252930',color:'#888',borderRadius:3,cursor:'pointer'}}>{audioFileName||'Load Audio...'}</button>
+      </>}
+      {audioMode==='mic'&&<span style={{fontSize:9,color:'#ff5544'}}>{"\u23FA"} MIC LIVE</span>}
+      {audioMode!=='none'&&<>
+        <div style={{width:80,height:8,background:'#0c0e12',borderRadius:2,overflow:'hidden',border:'1px solid #1e222a'}}>
+          <div style={{height:'100%',width:`${Math.min(100,audioLevel*300)}%`,background:audioLevel>0.6?'#ff5544':audioLevel>0.3?'#e8aa22':'#44ffaa',borderRadius:2,transition:'width 0.05s'}}/>
+        </div>
+        <div style={{width:8,height:8,borderRadius:'50%',background:beatDetected?'#e8aa22':'#252930',boxShadow:beatDetected?'0 0 10px #e8aa22':'none',transition:'all 0.05s'}}/>
+      </>}
+      {detectedBpm&&audioMode==='file'&&<>
+        <span style={{fontSize:9,color:'#44ffaa',letterSpacing:0.5}}>SYNC: {detectedBpm}{"\u2192"}{bpm} BPM ({(bpm/detectedBpm).toFixed(2)}x)</span>
+        <button onClick={()=>setBpm(detectedBpm)} style={{padding:'2px 8px',fontSize:9,background:'#0c0e12',border:'1px solid #252930',color:'#888',borderRadius:3,cursor:'pointer'}}>Match BPM</button>
+      </>}
+      {audioMode!=='none'&&<div style={{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}}>
+        <button onClick={()=>setAudioMuted(m=>!m)} style={{padding:'2px 6px',fontSize:9,background:audioMuted?'#ff554422':'#0c0e12',border:`1px solid ${audioMuted?'#ff5544':'#252930'}`,color:audioMuted?'#ff5544':'#888',borderRadius:3,cursor:'pointer',fontWeight:audioMuted?'bold':'normal'}}>{audioMuted?'MUTED':'MUTE'}</button>
+        <span style={{fontSize:8,color:'#444'}}>VOL</span>
+        <input type="range" min={0} max={1} step={0.01} value={audioVolume} onChange={e=>setAudioVolume(+e.target.value)} style={{width:60,accentColor:audioMuted?'#555':'#e8aa22',opacity:audioMuted?0.4:1}}/>
+        <span style={{fontSize:8,color:'#555'}}>{audioMuted?'--':Math.round(audioVolume*100)+'%'}</span>
+      </div>}
+    </div>
+  );
+}
+
+function LightingTimeline() {
+  const [cues,setCuesRaw] = useState(defaultCues);
+  const undoHistoryRef = useRef([]);
+  const setCues = useCallback((updater) => {
+    setCuesRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if(JSON.stringify(prev) !== JSON.stringify(next)){
+        undoHistoryRef.current = [...undoHistoryRef.current.slice(-19), prev];
+      }
+      return next;
+    });
+  }, []);
+  const handleGlobalUndo = useCallback(() => {
+    if(undoHistoryRef.current.length === 0) return;
+    const prev = undoHistoryRef.current.pop();
+    setCuesRaw(prev);
+  }, []);
+  const [playing,setPlaying] = useState(false);
+  const [playhead,setPlayhead] = useState(0);
+  const [loopStart,setLoopStart] = useState(0);
+  const [loopEnd,setLoopEnd] = useState(16);
+  const [loopEnabled,setLoopEnabled] = useState(true);
+  const [zoom,setZoom] = useState(1);
+  const [selectedCue,setSelectedCue] = useState(null);
+  const [selectedCues,setSelectedCues] = useState(new Set());
+  const [boxSelect,setBoxSelect] = useState(null);
+  const [dragging,setDragging] = useState(null);
+  const [resizing,setResizing] = useState(null);
+  const [tool,setTool] = useState("select");
+  const [bpm,setBpm] = useState(120);
+  const [snapToGrid,setSnapToGrid] = useState(true);
+  const [expandedFixtures,setExpandedFixtures] = useState(new Set([1,2]));
+  const [expandedGroups,setExpandedGroups] = useState(new Set(["1-INTENSITY","1-POSITION","1-COLOR","2-INTENSITY","2-COLOR"]));
+
+  const [audioMode,setAudioMode] = useState("none");
+  const [audioFileName,setAudioFileName] = useState(null);
+  const [audioLevel,setAudioLevel] = useState(0);
+  const [beatDetected,setBeatDetected] = useState(false);
+  const [detectedBpm,setDetectedBpm] = useState(null);
+  const [audioVolume,setAudioVolume] = useState(0.8);
+  const [audioMuted,setAudioMuted] = useState(false);
+  const [waveformPeaks,setWaveformPeaks] = useState(null);
+  const [audioDurationBeats,setAudioDurationBeats] = useState(0);
+  const [scrollLeft,setScrollLeft] = useState(0);
+  const [loopFlash,setLoopFlash] = useState(false);
+  const [rightTab,setRightTab] = useState("cue");
+  const [fxStart,setFxStart] = useState(0);
+  const [fxEnd,setFxEnd] = useState(16);
+  const [copyMode,setCopyMode] = useState(false);
+  const [copiedCue,setCopiedCue] = useState(null);
+  const [sequenceStorage,setSequenceStorage] = useState(()=>{const s={};PARAM_GROUPS.forEach(g=>{s[g.group]=new Array(100).fill(null);});return s;});
+  const [seqCategory,setSeqCategory] = useState("INTENSITY");
+  const [seqStoreMode,setSeqStoreMode] = useState(false);
+  const [seqClearMode,setSeqClearMode] = useState(false);
+  const [seqRecallMode,setSeqRecallMode] = useState("merge");
+  const [lastRecalledBatchId,setLastRecalledBatchId] = useState(null);
+  const shiftTimerRef = useRef(null);
+  const beatEventRef = useRef(null);
+
+  const timelineRef=useRef(null), animRef=useRef(null), lastTimeRef=useRef(null), stateRef=useRef({}), playheadRef=useRef(0);
+  const audioEngineRef = useRef(null);
+  stateRef.current={playhead,loopStart,loopEnd,loopEnabled,bpm,audioMode};
+  playheadRef.current=playhead;
+
+  const handleAudioLevel = useCallback((level) => setAudioLevel(level), []);
+  const handleBeat = useCallback(() => {
+    setBeatDetected(true);
+    beatEventRef.current = { time: performance.now(), beat: playheadRef.current };
+    setTimeout(() => setBeatDetected(false), 100);
+  }, []);
+  const handleFileLoaded = useCallback(({ buffer, peaks, durationBeats, detectedBpm: dbpm, fileName }) => {
+    setWaveformPeaks(peaks);
+    setAudioDurationBeats(durationBeats);
+    setDetectedBpm(dbpm);
+    setAudioFileName(fileName);
+  }, []);
+
+  const audioEngine = useAudioEngine({ bpm, playing, playhead, audioMode, audioVolume, audioMuted, onLevel: handleAudioLevel, onBeat: handleBeat, onFileLoaded: handleFileLoaded });
+  audioEngineRef.current = audioEngine;
+
+  const bw=BEAT_WIDTH*zoom;
+  const beatToX=b=>b*bw;
+  const xToBeat=x=>x/bw;
+  const snapBeat=useCallback(b=>snapToGrid?Math.round(b*4)/4:b,[snapToGrid]);
+
+  useEffect(()=>{
+    if(playing){
+      lastTimeRef.current=null;
+      if (stateRef.current.audioMode === "file") {
+        audioEngineRef.current?.ensureContext();
+        audioEngineRef.current?.startFilePlayback(playheadRef.current);
+      }
+      const tick=now=>{
+        if(lastTimeRef.current===null) lastTimeRef.current=now;
+        const delta=(now-lastTimeRef.current)/1000;
+        lastTimeRef.current=now;
+        const {loopStart,loopEnd,loopEnabled,bpm,audioMode}=stateRef.current;
+        setPlayhead(prev=>{
+          let next;
+          if (audioMode === "file" && audioEngineRef.current) {
+            const audioBeat = audioEngineRef.current.getPlaybackBeat();
+            next = audioBeat !== null ? audioBeat : prev + delta*(bpm/60);
+          } else {
+            next = prev + delta*(bpm/60);
+          }
+          if(loopEnabled&&next>=loopEnd) {
+            next=loopStart+(next-loopEnd);
+            if (audioMode === "file") audioEngineRef.current?.seekTo(next);
+            setLoopFlash(true); setTimeout(()=>setLoopFlash(false), 250);
+          }
+          else if(next>=TOTAL_BEATS) next=0;
+          return next;
+        });
+        animRef.current=requestAnimationFrame(tick);
+      };
+      animRef.current=requestAnimationFrame(tick);
+    } else {
+      cancelAnimationFrame(animRef.current);
+      if (stateRef.current.audioMode === "file") audioEngineRef.current?.stopFilePlayback();
+    }
+    return ()=>cancelAnimationFrame(animRef.current);
+  },[playing]);
+
+  const liveValues=useMemo(()=>{
+    const map={};
+    cues.forEach(c=>{if(playhead>=c.beat&&playhead<c.beat+c.duration) map[`${c.fixtureId}-${c.param}`]=interpolateCue(c,playhead);});
+    return map;
+  },[cues,playhead]);
+
+  const rows=[];
+  let yOff=0;
+  FIXTURES.forEach(fx=>{
+    rows.push({type:"fixture",fixtureId:fx.id,y:yOff,h:FIXTURE_HDR_H}); yOff+=FIXTURE_HDR_H;
+    if(expandedFixtures.has(fx.id)){
+      PARAM_GROUPS.forEach(group=>{
+        const gk=`${fx.id}-${group.group}`;
+        rows.push({type:"group",fixtureId:fx.id,groupId:group.group,group,y:yOff,h:GROUP_HDR_H}); yOff+=GROUP_HDR_H;
+        if(expandedGroups.has(gk)){ group.params.forEach(param=>{ rows.push({type:"param",fixtureId:fx.id,paramId:param.id,param,y:yOff,h:LANE_H}); yOff+=LANE_H; }); }
+      });
+    }
+  });
+  const totalH=yOff, totalW=TOTAL_BEATS*bw;
+
+  const toggleFixture=id=>setExpandedFixtures(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
+  const toggleGroup=gk=>setExpandedGroups(prev=>{const s=new Set(prev);s.has(gk)?s.delete(gk):s.add(gk);return s;});
+
+  const handleParamSelect = useCallback((paramId, groupName) => {
+    setExpandedFixtures(new Set(FIXTURES.map(fx => fx.id)));
+    setExpandedGroups(new Set(FIXTURES.map(fx => `${fx.id}-${groupName}`)));
+  }, []);
+
+  const handleGridMouseDown=e=>{
+    if(e.target.dataset.cue) return;
+    const rect=timelineRef.current.getBoundingClientRect();
+    const x=e.clientX-rect.left-LABEL_W-PARAM_LABEL_W+timelineRef.current.scrollLeft;
+    const y=e.clientY-rect.top-RULER_H+timelineRef.current.scrollTop;
+    const beat=snapBeat(Math.max(0,xToBeat(x)));
+    const row=rows.find(r=>r.type==="param"&&y>=r.y&&y<r.y+r.h);
+    if(copyMode&&copiedCue&&row){
+      const newCue={...copiedCue,id:genId(),fixtureId:row.fixtureId,param:row.paramId,beat};
+      setSelectedCue(newCue.id);
+      setCues(prev=>[...prev,newCue]);
+      return;
+    }
+    if(tool==="erase"){
+      setSelectedCue(null);setSelectedCues(new Set());
+      setBoxSelect({startX:x,startY:y,curX:x,curY:y});
+      return;
+    }
+    if(!row) return;
+    if(tool!=="draw") return;
+    const param=getParam(row.paramId);
+    const newCue={id:genId(),fixtureId:row.fixtureId,param:row.paramId,beat,duration:2,value:Math.round((param.min+param.max)/2),easing:"linear",fadeIn:0,fadeOut:0,startValue:param.min,endValue:param.min};
+    setSelectedCue(newCue.id);
+    setCues(prev=>[...prev,newCue]);
+  };
+
+  const handleCueMouseDown=(e,cue)=>{
+    e.stopPropagation();
+    if(copyMode){
+      setCopiedCue({...cue,id:null});
+      return;
+    }
+    if(tool==="erase"){setCues(prev=>prev.filter(c=>c.id!==cue.id));return;}
+    setSelectedCue(cue.id);
+    if(e.target.dataset.resize) setResizing({id:cue.id,startX:e.clientX,startDuration:cue.duration});
+    else setDragging({id:cue.id,startX:e.clientX,startBeat:cue.beat});
+  };
+
+  useEffect(()=>{
+    const onMove=e=>{
+      if(dragging){const db=xToBeat(e.clientX-dragging.startX);setCues(prev=>prev.map(c=>c.id===dragging.id?{...c,beat:snapBeat(Math.max(0,dragging.startBeat+db))}:c));}
+      if(resizing){const db=xToBeat(e.clientX-resizing.startX);setCues(prev=>prev.map(c=>c.id===resizing.id?{...c,duration:Math.max(0.25,snapBeat(resizing.startDuration+db))}:c));}
+      if(boxSelect&&timelineRef.current){
+        const rect=timelineRef.current.getBoundingClientRect();
+        const x=e.clientX-rect.left-LABEL_W-PARAM_LABEL_W+timelineRef.current.scrollLeft;
+        const y=e.clientY-rect.top-RULER_H+timelineRef.current.scrollTop;
+        setBoxSelect(prev=>prev?{...prev,curX:x,curY:y}:null);
+      }
+    };
+    const onUp=()=>{
+      if(boxSelect){
+        const x1=Math.min(boxSelect.startX,boxSelect.curX),x2=Math.max(boxSelect.startX,boxSelect.curX);
+        const y1=Math.min(boxSelect.startY,boxSelect.curY),y2=Math.max(boxSelect.startY,boxSelect.curY);
+        const beatL=xToBeat(x1),beatR=xToBeat(x2);
+        const sel=new Set();
+        cues.forEach(c=>{
+          const row=rows.find(r=>r.type==="param"&&r.fixtureId===c.fixtureId&&r.paramId===c.param);
+          if(!row) return;
+          const cueL=c.beat,cueR=c.beat+c.duration;
+          const cueY=row.y,cueYB=row.y+row.h;
+          if(cueR>beatL&&cueL<beatR&&cueYB>y1&&cueY<y2) sel.add(c.id);
+        });
+        if(tool==="erase"&&sel.size>0){
+          setCues(prev=>prev.filter(c=>!sel.has(c.id)));
+          setSelectedCues(new Set());setSelectedCue(null);
+        } else {
+          setSelectedCues(sel);
+          if(sel.size===1) setSelectedCue([...sel][0]);
+        }
+        setBoxSelect(null);
+      }
+      setDragging(null);setResizing(null);
+    };
+    window.addEventListener("mousemove",onMove); window.addEventListener("mouseup",onUp);
+    return()=>{window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp);};
+  },[dragging,resizing,boxSelect,zoom,snapToGrid,cues,rows,tool]);
+
+  useEffect(()=>{
+    const onDown=e=>{
+      if(e.key==="Shift"&&!shiftTimerRef.current){
+        shiftTimerRef.current=setTimeout(()=>{setCopyMode(true);},2000);
+      }
+      if(e.key==="Escape"){setCopyMode(false);setCopiedCue(null);setSelectedCues(new Set());}
+      if((e.key==="Delete"||e.key==="Backspace")&&!e.target.closest("input")){
+        e.preventDefault();
+        if(selectedCues.size>0){setCues(prev=>prev.filter(c=>!selectedCues.has(c.id)));setSelectedCues(new Set());setSelectedCue(null);}
+        else if(selectedCue){setCues(prev=>prev.filter(c=>c.id!==selectedCue));setSelectedCue(null);}
+      }
+      if(e.key==="z"&&(e.ctrlKey||e.metaKey)&&!e.shiftKey){e.preventDefault();handleGlobalUndo();}
+    };
+    const onUp=e=>{
+      if(e.key==="Shift"){
+        if(shiftTimerRef.current){clearTimeout(shiftTimerRef.current);shiftTimerRef.current=null;}
+      }
+    };
+    window.addEventListener("keydown",onDown);window.addEventListener("keyup",onUp);
+    return()=>{window.removeEventListener("keydown",onDown);window.removeEventListener("keyup",onUp);};
+  },[]);
+
+  const handleLoopDrag=(e,which)=>{
+    e.stopPropagation();
+    const startX=e.clientX, startVal=which==="start"?loopStart:loopEnd;
+    const onMove=ev=>{
+      const val=snapBeat(Math.max(0,Math.min(TOTAL_BEATS,startVal+xToBeat(ev.clientX-startX))));
+      if(which==="start") setLoopStart(Math.min(val,loopEnd-1));
+      else setLoopEnd(Math.max(val,loopStart+1));
+    };
+    const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
+    window.addEventListener("mousemove",onMove); window.addEventListener("mouseup",onUp);
+  };
+
+  const handleFxDrag=(e,which)=>{
+    e.stopPropagation();
+    const startX=e.clientX, startVal=which==="start"?fxStart:fxEnd;
+    const onMove=ev=>{
+      const val=snapBeat(Math.max(0,Math.min(TOTAL_BEATS,startVal+xToBeat(ev.clientX-startX))));
+      if(which==="start") setFxStart(Math.min(val,fxEnd-1));
+      else setFxEnd(Math.max(val,fxStart+1));
+    };
+    const onUp=()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
+    window.addEventListener("mousemove",onMove); window.addEventListener("mouseup",onUp);
+  };
+
+  const selCue=cues.find(c=>c.id===selectedCue);
+  const selParam=selCue?getParam(selCue.param):null;
+  const updateCue=(key,val)=>setCues(prev=>prev.map(c=>c.id===selCue.id?{...c,[key]:val}:c));
+
+  return (
+    <div style={{width:"100%",height:"100vh",background:"#141820",display:"flex",flexDirection:"column",fontFamily:"'Courier New',monospace",color:"#c0c6d0",overflow:"hidden",userSelect:"none"}}>
+
+      {loopFlash&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(232,170,34,0.08)",pointerEvents:"none",zIndex:999,animation:"loopflash 0.25s ease-out forwards"}}/>}
+      {(()=>{
+        const msg=copyMode?(copiedCue?{text:"PASTE \u2014 click lane to place cue",color:"#44aaff"}:{text:"COPY \u2014 click a cue to copy",color:"#44ffaa"}):(tool==="erase"?{text:"ERASE \u2014 click cues to delete",color:"#ff4444"}:null);
+        return msg?<div style={{position:"fixed",top:6,left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:5,background:"#0c0e12dd",border:`1px solid ${msg.color}44`,borderRadius:4,padding:"3px 10px",zIndex:998,pointerEvents:"none"}}>
+          <span style={{fontSize:8,color:msg.color,letterSpacing:1}}>{"\u25CF"}</span>
+          <span style={{fontSize:8,color:msg.color+"cc",letterSpacing:1}}>{msg.text}</span>
+        </div>:null;
+      })()}
+      <style>{`@keyframes loopflash{0%{opacity:1}100%{opacity:0}}
+@keyframes copyglow{0%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}25%{box-shadow:0 0 12px #44ffaa88,0 0 24px #44ffaa44,0 0 36px #44ffaa22,inset 0 0 10px #44ffaa22;border-color:#44ffaacc}50%{box-shadow:0 0 6px #44ffaa55,0 0 14px #44ffaa33,inset 0 0 8px #44ffaa15;border-color:#44ffaa99}75%{box-shadow:0 0 16px #44ffaaaa,0 0 30px #44ffaa55,0 0 44px #44ffaa22,inset 0 0 12px #44ffaa33;border-color:#44ffaadd}100%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}}
+@keyframes pasteglow{0%{box-shadow:0 0 4px #44aaff44,0 0 8px #44aaff22,inset 0 0 6px #44aaff11;border-color:#44aaff88}25%{box-shadow:0 0 12px #44aaff88,0 0 24px #44aaff44,0 0 36px #44aaff22,inset 0 0 10px #44aaff22;border-color:#44aaffcc}50%{box-shadow:0 0 6px #44aaff55,0 0 14px #44aaff33,inset 0 0 8px #44aaff15;border-color:#44aaff99}75%{box-shadow:0 0 16px #44aaffaa,0 0 30px #44aaff55,0 0 44px #44aaff22,inset 0 0 12px #44aaff33;border-color:#44aaffdd}100%{box-shadow:0 0 4px #44aaff44,0 0 8px #44aaff22,inset 0 0 6px #44aaff11;border-color:#44aaff88}}
+@keyframes sparkletext{0%,100%{text-shadow:0 0 4px currentColor}30%{text-shadow:0 0 8px currentColor,0 0 16px currentColor}60%{text-shadow:0 0 2px currentColor}80%{text-shadow:0 0 12px currentColor,0 0 20px currentColor}}
+@keyframes shimmer{0%{background-position:200% center}100%{background-position:-200% center}}
+@keyframes eraseglow{0%{box-shadow:0 0 4px #ff444444,0 0 8px #ff444422,inset 0 0 6px #ff444411;border-color:#ff444488}25%{box-shadow:0 0 12px #ff444488,0 0 24px #ff444444,0 0 36px #ff444422,inset 0 0 10px #ff444422;border-color:#ff4444cc}50%{box-shadow:0 0 6px #ff444455,0 0 14px #ff444433,inset 0 0 8px #ff444415;border-color:#ff444499}75%{box-shadow:0 0 16px #ff4444aa,0 0 30px #ff444455,0 0 44px #ff444422,inset 0 0 12px #ff444433;border-color:#ff4444dd}100%{box-shadow:0 0 4px #ff444444,0 0 8px #ff444422,inset 0 0 6px #ff444411;border-color:#ff444488}}
+@keyframes seqstore{0%,100%{box-shadow:0 0 4px #e8aa2244;border-color:#e8aa2288;background:#1a150066}50%{box-shadow:0 0 10px #e8aa2288,0 0 20px #e8aa2244;border-color:#e8aa22;background:#2a1a0088}}
+@keyframes seqclear{0%,100%{box-shadow:0 0 4px #ff554444;border-color:#ff554488;background:#1c0f0f66}50%{box-shadow:0 0 10px #ff554488,0 0 20px #ff554444;border-color:#ff5544;background:#2a0f0f88}}`}</style>
+      <div style={{height:46,background:"#1e2230",borderBottom:"1px solid #2e3440",display:"flex",alignItems:"center",padding:"0 14px",gap:10,flexShrink:0}}>
+        <span style={{color:"#e8aa22",fontWeight:"bold",fontSize:13,letterSpacing:3}}>{"\u2728"} LUMINA FX</span>
+        <div style={{width:1,height:22,background:"#252930"}}/>
+        {[{icon:"\u23EE",fn:()=>{setPlayhead(0);if(audioMode==="file"&&playing)audioEngine.seekTo(0);}},{icon:"\u23F9",fn:()=>{setPlaying(false);setPlayhead(loopStart);audioEngine.stopFilePlayback();}},{icon:playing?"\u23F8":"\u25B6",fn:()=>{if(!playing&&audioMode!=="none")audioEngine.ensureContext();setPlaying(p=>!p);},active:playing}].map((b,i)=>(
+          <button key={i} onClick={b.fn} style={{background:b.active?"#e8aa22":"#1e222a",border:"1px solid "+(b.active?"#e8aa22":"#2e3340"),color:b.active?"#111":"#c0c6d0",borderRadius:4,padding:"3px 12px",cursor:"pointer",fontSize:14}}>{b.icon}</button>
+        ))}
+        <div style={{width:1,height:22,background:"#252930"}}/>
+        <span style={{fontSize:9,color:"#555"}}>BPM</span>
+        <input type="number" value={bpm} min={20} max={300} onChange={e=>setBpm(+e.target.value)} style={{width:52,background:"#0c0e12",border:"1px solid #2e3340",color:"#e8aa22",borderRadius:3,padding:"2px 6px",fontSize:12,textAlign:"center"}}/>
+        <div style={{background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"2px 10px",fontSize:12,color:"#44ffaa",letterSpacing:2,minWidth:100,textAlign:"center"}}>
+          {String(Math.floor(playhead/4)+1).padStart(3,"0")} : {Math.floor(playhead%4)+1}
+          <span style={{fontSize:8,color:"#333",marginLeft:4}}>BAR.BEAT</span>
+        </div>
+        <div style={{flex:1}}/>
+        <button onClick={()=>setLoopEnabled(v=>!v)} style={{background:loopEnabled?"#162a1e":"#1e222a",border:"1px solid "+(loopEnabled?"#44ffaa66":"#2e3340"),color:loopEnabled?"#44ffaa":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u21BB"} LOOP</button>
+        <button onClick={()=>setSnapToGrid(v=>!v)} style={{background:snapToGrid?"#162030":"#1e222a",border:"1px solid "+(snapToGrid?"#4488ff66":"#2e3340"),color:snapToGrid?"#4488ff":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u25A6"} SNAP</button>
+        {[{id:"select",icon:"\u2190"},{id:"draw",icon:"\u270E"},{id:"erase",icon:"\u2716"}].map(t=>(
+          <button key={t.id} onClick={()=>setTool(t.id)} style={{background:t.id==="erase"&&tool===t.id?"linear-gradient(135deg,#3a1a1a,#662222aa,#3a1a1a)":(tool===t.id?"#e8aa22":"#1e222a"),backgroundSize:t.id==="erase"&&tool===t.id?"400% 100%":"auto",border:"1px solid "+(t.id==="erase"&&tool===t.id?"#ff4444":tool===t.id?"#e8aa22":"#2e3340"),color:t.id==="erase"&&tool===t.id?"#ff4444":(tool===t.id?"#111":"#777"),borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,animation:t.id==="erase"&&tool===t.id?"eraseglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":"none",transition:"all 0.3s ease"}}>{t.icon}</button>
+        ))}
+        <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCue(null);}else{setCopyMode(true);}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCue?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCue?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCue?"PASTE":"COPY"):"COPY"}</button>
+        <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e222a",border:"1px solid "+(undoHistoryRef.current.length?"#e8aa2266":"#2e3340"),color:undoHistoryRef.current.length?"#e8aa22":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
+          <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#e8aa22"}}/>
+          <span style={{fontSize:9,color:"#555"}}>{Math.round(zoom*100)}%</span>
+        </div>
+      </div>
+
+      <AudioControlBar audioMode={audioMode} setAudioMode={setAudioMode} audioFileName={audioFileName} audioLevel={audioLevel} beatDetected={beatDetected} detectedBpm={detectedBpm} audioVolume={audioVolume} setAudioVolume={setAudioVolume} audioMuted={audioMuted} setAudioMuted={setAudioMuted} onFileLoad={f=>audioEngine.loadFile(f)} bpm={bpm} setBpm={setBpm}/>
+
+      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+        <div ref={timelineRef} onMouseDown={handleGridMouseDown} onScroll={e=>setScrollLeft(e.target.scrollLeft)} style={{flex:1,overflow:"auto",position:"relative",cursor:copyMode?(copiedCue?"copy":"cell"):tool==="draw"?"crosshair":tool==="erase"?"not-allowed":"default"}}>
+          <div style={{width:LABEL_W+PARAM_LABEL_W+totalW,minHeight:(RULER_H+(waveformPeaks?40:0))+totalH}}>
+            <div style={{position:"sticky",top:0,zIndex:20,width:LABEL_W+PARAM_LABEL_W+totalW,background:"#1a1e28",borderBottom:"1px solid #2e3440"}}>
+              <div style={{height:RULER_H,display:"flex"}}>
+                <div style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #252930",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"#2a2e38",letterSpacing:2}}>FIXTURE {"\u00BB"} PARAMETER</div>
+                <div style={{position:"relative",flex:1}}>
+                  {loopEnabled&&<>
+                    <div style={{position:"absolute",top:0,height:"100%",left:beatToX(loopStart),width:beatToX(loopEnd-loopStart),background:"rgba(68,255,170,0.07)",pointerEvents:"none",borderLeft:"1px solid #44ffaa88",borderRight:"1px solid #44ffaa88"}}/>
+                    {["start","end"].map(w=>(
+                      <div key={w} onMouseDown={e=>handleLoopDrag(e,w)} style={{position:"absolute",top:0,height:"100%",left:beatToX(w==="start"?loopStart:loopEnd)-5,width:10,cursor:"ew-resize",zIndex:5,display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:2}}>
+                        <div style={{width:2,height:16,background:"#44ffaa",borderRadius:1}}/>
+                      </div>
+                    ))}
+                  </>}
+                  {rightTab==="fx"&&<>
+                    <div style={{position:"absolute",top:0,height:"100%",left:beatToX(fxStart),width:beatToX(fxEnd-fxStart),background:"rgba(187,68,255,0.07)",pointerEvents:"none",borderLeft:"1px solid #bb44ff88",borderRight:"1px solid #bb44ff88"}}/>
+                    {["start","end"].map(w=>(
+                      <div key={"fx"+w} onMouseDown={e=>handleFxDrag(e,w)} style={{position:"absolute",top:0,height:"100%",left:beatToX(w==="start"?fxStart:fxEnd)-5,width:10,cursor:"ew-resize",zIndex:6,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:2}}>
+                        <div style={{width:2,height:16,background:"#bb44ff",borderRadius:1}}/>
+                      </div>
+                    ))}
+                  </>}
+                  {Array.from({length:TOTAL_BEATS+1}).map((_,i)=>i%4===0&&(
+                    <div key={i} style={{position:"absolute",top:0,left:beatToX(i),height:"100%",borderLeft:i%4===0?`2px solid ${i%16===0?"#e8aa22cc":"#e8aa2266"}`:"1px solid #2a3040",paddingLeft:3,paddingTop:i%16===0?5:10,fontSize:i%16===0?10:8,color:i%16===0?"#e8aa22":"#888",fontWeight:i%16===0?"bold":"normal"}}>
+                      {i%16===0?`\u266B${Math.floor(i/4)+1}`:`${Math.floor(i/4)+1}`}
+                    </div>
+                  ))}
+                  <div style={{position:"absolute",top:0,left:beatToX(playhead)-0.5,width:1,height:(RULER_H+(waveformPeaks?40:0))+totalH,background:"#ff3333",zIndex:30,pointerEvents:"none",boxShadow:"0 0 5px #ff333388"}}>
+                    <div style={{width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderTop:"7px solid #ff3333",transform:"translateX(-4.5px)"}}/>
+                  </div>
+                </div>
+              </div>
+              {waveformPeaks&&<div style={{height:40,background:'#0a0c10',borderTop:'1px solid #1e222a',display:'flex'}}>
+                <div style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:'1px solid #1e222a',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,color:'#2a2e38',letterSpacing:1}}>{"\u266A"} WAVEFORM</div>
+                <div style={{position:'relative',flex:1,overflow:'hidden'}}>
+                  <WaveformCanvas peaks={waveformPeaks} durationBeats={audioDurationBeats} beatWidth={BEAT_WIDTH} zoom={zoom} scrollLeft={scrollLeft} width={Math.max(100,totalW)} height={40} playhead={playhead} loopStart={loopStart} loopEnd={loopEnd} loopEnabled={loopEnabled}/>
+                </div>
+              </div>}
+            </div>
+
+            {rows.map((row,ri)=>{
+              if(row.type==="fixture"){
+                const fx=FIXTURES.find(f=>f.id===row.fixtureId);
+                const isExp=expandedFixtures.has(fx.id);
+                const hasActive=cues.some(c=>c.fixtureId===fx.id&&playhead>=c.beat&&playhead<c.beat+c.duration);
+                return(
+                  <div key={`fx-${fx.id}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:"#222838",borderBottom:"1px solid #3a4050",zIndex:6}}>
+                    <div onClick={()=>toggleFixture(fx.id)} style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #3a4050",display:"flex",alignItems:"center",padding:"0 8px",gap:7,cursor:"pointer"}}>
+                      <span style={{fontSize:8,color:"#555"}}>{isExp?"\u25BC":"\u25B6"}</span>
+                      <div style={{width:10,height:10,borderRadius:"50%",background:hasActive?fx.color:"#252930",boxShadow:hasActive?`0 0 10px ${fx.color}`:"none",transition:"all 0.05s"}}/>
+                      <div>
+                        <div style={{fontSize:11,color:"#d0d6e0",fontWeight:"bold"}}>{fx.name}</div>
+                        <div style={{fontSize:8,color:"#3a3f4c"}}>{fx.type}</div>
+                      </div>
+                      <div style={{flex:1}}/>
+                      <div style={{fontSize:8,color:"#333"}}>{cues.filter(c=>c.fixtureId===fx.id).length}c</div>
+                    </div>
+                    <div style={{flex:1,background:"#1c2030"}}/>
+                  </div>
+                );
+              }
+              if(row.type==="group"){
+                const gk=`${row.fixtureId}-${row.groupId}`;
+                const isExp=expandedGroups.has(gk);
+                return(
+                  <div key={gk} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:"#1a1e2a",borderBottom:"1px solid #2a3040",zIndex:5}}>
+                    <div onClick={()=>toggleGroup(gk)} style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #2a3040",display:"flex",alignItems:"center",padding:"0 8px 0 24px",gap:6,cursor:"pointer"}}>
+                      <span style={{fontSize:7,color:"#444"}}>{isExp?"\u25BC":"\u25B6"}</span>
+                      <div style={{width:12,height:2,borderRadius:1,background:row.group.color,opacity:0.6}}/>
+                      <span style={{fontSize:9,color:row.group.color,opacity:0.75,letterSpacing:1.5}}>{row.group.group}</span>
+                      <span style={{fontSize:7,color:"#333",marginLeft:"auto"}}>{row.group.params.length} params</span>
+                    </div>
+                    <div style={{flex:1,background:"#161a26"}}/>
+                  </div>
+                );
+              }
+              if(row.type==="param"){
+                const param=row.param;
+                const laneCues=cues.filter(c=>c.fixtureId===row.fixtureId&&c.param===row.paramId);
+                const liveVal=liveValues[`${row.fixtureId}-${row.paramId}`];
+                return(
+                  <div key={`${row.fixtureId}-${row.paramId}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:ri%2===0?"#151a24":"#171c28",borderBottom:"1px solid #222838"}}>
+                    <div style={{width:LABEL_W,flexShrink:0,borderRight:"1px solid #1a1e26"}}/>
+                    <div style={{width:PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #1e222a",display:"flex",alignItems:"center",padding:"0 5px",gap:4}}>
+                      <div style={{width:3,height:20,borderRadius:1,background:param.color,opacity:0.5,flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:9,color:"#999",whiteSpace:"nowrap",overflow:"hidden"}}>{param.label}</div>
+                        <div style={{fontSize:7,color:"#2e3340"}}>{param.min}-{param.max}{param.unit}</div>
+                      </div>
+                      <div style={{fontSize:10,fontWeight:"bold",color:liveVal!==undefined?"#e8aa22":"#2a2e38",minWidth:30,textAlign:"right",flexShrink:0,transition:"color 0.1s"}}>
+                        {liveVal!==undefined?Math.round(liveVal):"\u2014"}
+                      </div>
+                    </div>
+                    <div style={{position:"relative",flex:1,height:"100%",overflow:"hidden"}}>
+                      {Array.from({length:TOTAL_BEATS+1}).map((_,i)=>(
+                        <div key={i} style={{position:"absolute",top:0,left:beatToX(i),width:i%4===0?2:1,height:"100%",background:i%16===0?"#e8aa2244":i%4===0?"#e8aa2222":"#1e2230",pointerEvents:"none"}}/>
+                      ))}
+                      {loopEnabled&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(loopStart),width:beatToX(loopEnd-loopStart),background:"rgba(68,255,170,0.03)",pointerEvents:"none"}}/>}
+                      {rightTab==="fx"&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(fxStart),width:beatToX(fxEnd-fxStart),background:"rgba(187,68,255,0.03)",pointerEvents:"none"}}/>}
+                      {laneCues.map(cue=>{
+                        const isActive=playhead>=cue.beat&&playhead<cue.beat+cue.duration;
+                        const isSel=selectedCue===cue.id||selectedCues.has(cue.id);
+                        const cueW=Math.max(4,beatToX(cue.duration)-2);
+                        const cueH=row.h-4;
+                        return(
+                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,background:isSel?`linear-gradient(180deg,${param.color}55,${param.color}22)`:isActive?`linear-gradient(180deg,${param.color}33,${param.color}11)`:`linear-gradient(180deg,${param.color}22,${param.color}08)`,border:isSel?`1px solid ${param.color}`:`1px solid ${param.color}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${param.color}66`:isActive?`0 0 8px ${param.color}44`:"none",zIndex:isSel?3:1}}>
+                            <CurvePath cue={cue} w={cueW} h={cueH} color={param.color} isActive={isActive}/>
+                            <div style={{position:"absolute",top:2,left:3,fontSize:7,color:param.color,opacity:isActive?0.9:0.5,pointerEvents:"none"}}>{EASINGS[cue.easing||"linear"].icon}</div>
+                            <div style={{position:"absolute",bottom:2,left:3,fontSize:8,color:"#fff",opacity:0.8,pointerEvents:"none",whiteSpace:"nowrap"}}>{cue.value}{param.unit}</div>
+                            <div data-resize="true" style={{position:"absolute",right:0,top:0,width:5,height:"100%",cursor:"ew-resize",background:"rgba(255,255,255,0.05)"}}/>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
+            {boxSelect&&(()=>{const x1=Math.min(boxSelect.startX,boxSelect.curX),x2=Math.max(boxSelect.startX,boxSelect.curX),y1=Math.min(boxSelect.startY,boxSelect.curY),y2=Math.max(boxSelect.startY,boxSelect.curY);return <div style={{position:"absolute",left:LABEL_W+PARAM_LABEL_W+x1,top:RULER_H+(waveformPeaks?40:0)+y1,width:x2-x1,height:y2-y1,border:"1px solid #e8aa2288",background:"rgba(232,170,34,0.08)",borderRadius:2,pointerEvents:"none",zIndex:40}}/>;})()}
+            {selectedCues.size>0&&<div style={{position:"sticky",bottom:0,left:0,right:0,zIndex:50,display:"flex",justifyContent:"center",padding:4}}>
+              <div style={{background:"#0c0e12ee",border:"1px solid #ff444466",borderRadius:4,padding:"4px 12px",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:9,color:"#e8aa22"}}>{selectedCues.size} cues selected</span>
+                <button onClick={()=>{setCues(prev=>prev.filter(c=>!selectedCues.has(c.id)));setSelectedCues(new Set());setSelectedCue(null);}} style={{background:"#2a1010",border:"1px solid #ff444466",color:"#ff4444",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontSize:9}}>{"\u2716"} DELETE</button>
+                <button onClick={()=>{setSelectedCues(new Set());setSelectedCue(null);}} style={{background:"#1a1e28",border:"1px solid #33384488",color:"#555",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontSize:9}}>DESELECT</button>
+              </div>
+            </div>}
+          </div>
+        </div>
+
+        <div style={{width:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
+          <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
+            {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"}].map(tab=>(
+              <button key={tab.id} onClick={()=>setRightTab(tab.id)} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1c2030":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #e8aa22":"2px solid transparent",color:rightTab===tab.id?"#e8aa22":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
+            ))}
+          </div>
+          <div style={{flex:1,overflowY:"auto"}}>
+            {rightTab==="cue"?(
+              selCue&&selParam?(
+                <div style={{padding:10,display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:selParam.color}}/>
+                    <span style={{fontSize:10,color:selParam.color}}>{FIXTURES.find(f=>f.id===selCue.fixtureId)?.name}</span>
+                    <span style={{fontSize:9,color:"#555"}}>/ {selParam.label}</span>
+                  </div>
+                  {[
+                    {label:"BEAT",key:"beat",val:+selCue.beat.toFixed(2),min:0,max:TOTAL_BEATS,step:0.25},
+                    {label:"DURATION",key:"duration",val:+selCue.duration.toFixed(2),min:0.25,max:TOTAL_BEATS,step:0.25},
+                    {label:`TARGET (${selParam.unit})`,key:"value",val:selCue.value,min:selParam.min,max:selParam.max,step:1},
+                    {label:`START (${selParam.unit})`,key:"startValue",val:selCue.startValue??selParam.min,min:selParam.min,max:selParam.max,step:1},
+                    {label:`END (${selParam.unit})`,key:"endValue",val:selCue.endValue??selParam.min,min:selParam.min,max:selParam.max,step:1},
+                  ].map(row=>(
+                    <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2}}>
+                      <span style={{fontSize:8,color:"#3a3f4c",letterSpacing:1}}>{row.label}</span>
+                      <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #252930",color:"#e8aa22",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
+                      <input type="range" min={row.min} max={row.max} step={row.step} value={row.val} onChange={e=>updateCue(row.key,+e.target.value)} style={{width:"100%",accentColor:selParam.color}}/>
+                    </div>
+                  ))}
+                  <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
+                    <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:6}}>FADE TIMES</div>
+                    {[{label:"FADE IN",key:"fadeIn",val:selCue.fadeIn??0},{label:"FADE OUT",key:"fadeOut",val:selCue.fadeOut??0}].map(row=>(
+                      <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2,marginBottom:6}}>
+                        <span style={{fontSize:8,color:"#3a3f4c"}}>{row.label}</span>
+                        <input type="range" min={0} max={1} step={0.01} value={row.val} onChange={e=>updateCue(row.key,+e.target.value)} style={{width:"100%",accentColor:"#ffaa44"}}/>
+                        <span style={{fontSize:9,color:"#ffaa44",textAlign:"right"}}>{Math.round(row.val*100)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
+                    <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:6}}>EASING</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {Object.entries(EASINGS).map(([key,def])=>(
+                        <button key={key} onClick={()=>updateCue("easing",key)} style={{background:(selCue.easing||"linear")===key?"#252a34":"#0c0e12",border:"1px solid "+((selCue.easing||"linear")===key?selParam.color:"#252930"),color:(selCue.easing||"linear")===key?selParam.color:"#555",borderRadius:3,padding:"3px 7px",cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",gap:4}}>
+                          <span>{def.icon}</span><span>{def.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{marginTop:8,background:"#0c0e12",border:"1px solid #1e222a",borderRadius:3,overflow:"hidden"}}>
+                      <svg width="100%" height="44" viewBox="0 0 200 44">
+                        <path d={buildCurvePath({...selCue,beat:0,duration:1},200,40)} fill="none" stroke={selParam.color} strokeWidth={1.5}/>
+                        <line x1={0} y1={40} x2={200} y2={40} stroke="#1e222a" strokeWidth={1}/>
+                      </svg>
+                    </div>
+                  </div>
+                  <button onClick={()=>{setCues(prev=>prev.filter(c=>c.id!==selCue.id));setSelectedCue(null);}} style={{marginTop:4,background:"#1c0f0f",border:"1px solid #ff333344",color:"#ff5533",borderRadius:3,padding:"5px",cursor:"pointer",fontSize:10,letterSpacing:1}}>{"\u2716"} DELETE CUE</button>
+                </div>
+              ):(
+                <div style={{padding:14,fontSize:9,color:"#252930",lineHeight:2}}>Click a cue to inspect.<br/>{"\u270E"} Draw on a param lane to create cues.</div>
+              )
+            ):rightTab==="fx"?(
+              <EffectGenerator setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
+            ):(
+              <SequenceStoragePanel sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
+            )}
+          </div>
+          <div style={{borderTop:"1px solid #252930",padding:"8px 12px"}}>
+            <div style={{fontSize:8,color:"#44ffaa66",letterSpacing:2,marginBottom:6}}>LOOP REGION</div>
+            {[{label:"IN",val:loopStart,set:v=>setLoopStart(Math.min(v,loopEnd-1))},{label:"OUT",val:loopEnd,set:v=>setLoopEnd(Math.max(v,loopStart+1))}].map(row=>(
+              <div key={row.label} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                <span style={{fontSize:9,color:"#44ffaa66",width:24}}>{row.label}</span>
+                <input type="number" value={row.val} min={0} max={TOTAL_BEATS} onChange={e=>row.set(+e.target.value)} style={{flex:1,background:"#0c0e12",border:"1px solid #252930",color:"#44ffaa",borderRadius:3,padding:"2px 6px",fontSize:11}}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <FixturePadBar cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
+
+      <div style={{height:22,background:"#141820",borderTop:"1px solid #252930",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
+        {[{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'}].map(item=>(
+          <span key={item.label} style={{fontSize:8,color:"#444"}}>
+            <span style={{color:"#252930",marginRight:4}}>{item.label}</span>
+            <span style={{color:"#666"}}>{item.val}</span>
+          </span>
+        ))}
+        <div style={{flex:1}}/>
+        <span style={{fontSize:8,color:"#1e222a"}}>LUMINA FX v0.5</span>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<LightingTimeline />);
+  </script>
+</body>
+</html>
