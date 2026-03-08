@@ -911,6 +911,7 @@ function LightingTimeline() {
   const [scrollLeft,setScrollLeft] = useState(0);
   const [loopFlash,setLoopFlash] = useState(false);
   const [rightTab,setRightTab] = useState("cue");
+  const [rightPanelWide,setRightPanelWide] = useState(false);
   const [fxStart,setFxStart] = useState(0);
   const [fxEnd,setFxEnd] = useState(16);
   const [copyMode,setCopyMode] = useState(false);
@@ -1323,10 +1324,10 @@ function LightingTimeline() {
           </div>
         </div>
 
-        <div style={{width:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
+        <div style={{width:rightPanelWide?440:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
           <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
             {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"}].map(tab=>(
-              <button key={tab.id} onClick={()=>setRightTab(tab.id)} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1c2030":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #e8aa22":"2px solid transparent",color:rightTab===tab.id?"#e8aa22":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
+              <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1c2030":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #e8aa22":"2px solid transparent",color:rightTab===tab.id?"#e8aa22":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
             ))}
           </div>
           <div style={{flex:1,overflowY:"auto"}}>
