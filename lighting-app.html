@@ -1410,10 +1410,13 @@ function LightingTimeline() {
   fixtures.forEach(fx=>{
     rows.push({type:"fixture",fixtureId:fx.id,y:yOff,h:FIXTURE_HDR_H}); yOff+=FIXTURE_HDR_H;
     if(expandedFixtures.has(fx.id)){
+      const fxProfile = (DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT).map;
       PARAM_GROUPS.forEach(group=>{
+        const visParams = group.params.filter(p => p.id in fxProfile);
+        if(visParams.length === 0) return;
         const gk=`${fx.id}-${group.group}`;
-        rows.push({type:"group",fixtureId:fx.id,groupId:group.group,group,y:yOff,h:GROUP_HDR_H}); yOff+=GROUP_HDR_H;
-        if(expandedGroups.has(gk)){ group.params.forEach(param=>{ rows.push({type:"param",fixtureId:fx.id,paramId:param.id,param,y:yOff,h:LANE_H}); yOff+=LANE_H; }); }
+        rows.push({type:"group",fixtureId:fx.id,groupId:group.group,group:{...group,params:visParams},y:yOff,h:GROUP_HDR_H}); yOff+=GROUP_HDR_H;
+        if(expandedGroups.has(gk)){ visParams.forEach(param=>{ rows.push({type:"param",fixtureId:fx.id,paramId:param.id,param,y:yOff,h:LANE_H}); yOff+=LANE_H; }); }
       });
     }
   });
