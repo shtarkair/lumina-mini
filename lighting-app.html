@@ -380,6 +380,41 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
 function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
+  const fileInputRef = useRef(null);
+
+  const handleSave = () => {
+    const data = {
+      type: "lumina-project",
+      version: 1,
+      savedAt: new Date().toISOString(),
+      cues: cues,
+      sequenceStorage: sequenceStorage,
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "lumina-" + new Date().toISOString().slice(0,19).replace(/[:.]/g,"-") + ".lumina";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoad = (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
+        if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
+        if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
+      } catch(err) { alert("Failed to load file: " + err.message); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const handleClick = (i) => {
     if(seqStoreMode){
@@ -410,6 +445,11 @@ function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory
         <button onClick={()=>{setSeqStoreMode(!seqStoreMode);setSeqClearMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqStoreMode?"#2a1a00":"#0c0e12",border:seqStoreMode?"1px solid #e8aa22":"1px solid #252930",color:seqStoreMode?"#e8aa22":"#555",borderRadius:3,cursor:"pointer",animation:seqStoreMode?"seqstore 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>● STORE</button>
         <button onClick={()=>{setSeqClearMode(!seqClearMode);setSeqStoreMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqClearMode?"#1c0f0f":"#0c0e12",border:seqClearMode?"1px solid #ff5544":"1px solid #252930",color:seqClearMode?"#ff5544":"#555",borderRadius:3,cursor:"pointer",animation:seqClearMode?"seqclear 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>✖ CLEAR</button>
         <button onClick={()=>setSeqRecallMode(seqRecallMode==="merge"?"replace":"merge")} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0c0e12",border:"1px solid #252930",color:seqRecallMode==="merge"?"#44aaff":"#ff8844",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>{seqRecallMode==="merge"?"MERGE":"REPLACE"}</button>
+      </div>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <button onClick={handleSave} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE</button>
+        <button onClick={()=>fileInputRef.current.click()} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>📂 LOAD</button>
+        <input ref={fileInputRef} type="file" accept=".lumina,.json" onChange={handleLoad} style={{display:"none"}}/>
       </div>
       <div style={{display:"flex",gap:1,background:"#0c0e12",borderRadius:3,overflow:"hidden"}}>
         {SEQ_CATS.map(c=>(
@@ -478,6 +518,63 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
   const pressStart = useRef({});
   const lastBeatTimeRef = useRef(0);
 
+  // MIDI state
+  const [midiConnected, setMidiConnected] = useState(false);
+  const [midiLearn, setMidiLearn] = useState(null); // fixtureId waiting for learn, or null
+  const [midiMap, setMidiMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("lumina-midi-map")) || {}; } catch(e) { return {}; }
+  });
+  const midiMapRef = useRef(midiMap);
+  const midiLearnRef = useRef(null);
+  const handlePadPressRef = useRef(null);
+  const handlePadReleaseRef = useRef(null);
+
+  useEffect(() => { midiMapRef.current = midiMap; localStorage.setItem("lumina-midi-map", JSON.stringify(midiMap)); }, [midiMap]);
+  useEffect(() => { midiLearnRef.current = midiLearn; }, [midiLearn]);
+
+  const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const noteName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+  const reverseMidiMap = useMemo(() => { const r={}; Object.entries(midiMap).forEach(([note,fxId])=>{ r[fxId]=parseInt(note); }); return r; }, [midiMap]);
+
+  const connectMidi = useCallback(async () => {
+    if (!navigator.requestMIDIAccess) { alert("Web MIDI not supported in this browser. Please use Google Chrome."); return; }
+    try {
+      const access = await navigator.requestMIDIAccess({sysex: false});
+      setMidiConnected(true);
+      const onMessage = e => {
+        const [status, note, velocity] = e.data;
+        const cmd = status & 0xf0;
+        // Learn mode: assign this note to waiting fixture
+        if (midiLearnRef.current !== null && cmd === 0x90 && velocity > 0) {
+          const fxId = midiLearnRef.current;
+          setMidiMap(prev => {
+            const next = {...prev};
+            // Remove old mapping for this fixture
+            Object.keys(next).forEach(k => { if(next[k] === fxId) delete next[k]; });
+            next[note] = fxId;
+            return next;
+          });
+          setMidiLearn(null);
+          return;
+        }
+        // Note on
+        if (cmd === 0x90 && velocity > 0) {
+          const fxId = midiMapRef.current[note];
+          if (fxId && handlePadPressRef.current) handlePadPressRef.current(fxId);
+        }
+        // Note off
+        if (cmd === 0x80 || (cmd === 0x90 && velocity === 0)) {
+          const fxId = midiMapRef.current[note];
+          if (fxId && handlePadReleaseRef.current) handlePadReleaseRef.current(fxId);
+        }
+      };
+      access.inputs.forEach(input => { input.onmidimessage = onMessage; });
+      access.onstatechange = () => {
+        access.inputs.forEach(input => { input.onmidimessage = onMessage; });
+      };
+    } catch(err) { alert("MIDI access denied: " + err.message + "\n\nTip: Use Google Chrome and open via localhost for best MIDI support."); }
+  }, []);
+
   useEffect(() => {
     if (mode !== "rec" || !audioMode || audioMode === "none" || !beatEventRef?.current) return;
     const check = () => {
@@ -540,13 +637,16 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
     }
   };
 
+  useEffect(() => { handlePadPressRef.current = handlePadPress; }, [handlePadPress]);
+  useEffect(() => { handlePadReleaseRef.current = handlePadRelease; }, [handlePadRelease]);
+
   const WW=44, WH=88, GAP=22;
   const blackAfter = new Set([0,1,3,4,5]);
   const totalW = FIXTURES.length*(WW+GAP)-GAP+10;
 
   return (
     <div style={{background:"#0b0d11",borderTop:"2px solid #252930",flexShrink:0}}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}@keyframes recglow{0%,100%{box-shadow:0 0 8px #ff220066}50%{box-shadow:0 0 18px #ff2200bb}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}@keyframes recglow{0%,100%{box-shadow:0 0 8px #ff220066}50%{box-shadow:0 0 18px #ff2200bb}}@keyframes midipulse{0%,100%{box-shadow:0 0 6px #aa44ff44}50%{box-shadow:0 0 14px #aa44ffaa}}@keyframes midilearn{0%,100%{box-shadow:0 0 8px #cc66ffaa}50%{box-shadow:0 0 20px #cc66ffff}}`}</style>
       <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid #1a1d22",padding:"4px 10px",gap:8,flexWrap:"wrap"}}>
         <div style={{fontSize:7,color:"#3a3f4c",letterSpacing:2}}>PARAM:</div>
         <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
@@ -559,6 +659,15 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
           <button onClick={()=>setMode(m=>m==="rec"?null:"rec")} style={{padding:"4px 12px",background:mode==="rec"?"#ff2200":"#1a0a08",border:"2px solid "+(mode==="rec"?"#ff4422":"#3a1a14"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="rec"?"#fff":"#663322",boxShadow:mode==="rec"?"0 0 16px #ff220099":"none"}}>{mode==="rec"?"\u23FA REC":"\u23FA REC"}</button>
           <button onClick={()=>setMode(m=>m==="erase"?null:"erase")} style={{padding:"4px 12px",background:mode==="erase"?"#882200":"#100808",border:"2px solid "+(mode==="erase"?"#ff6600":"#2a1a10"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="erase"?"#ffaa44":"#443322"}}>{mode==="erase"?"\u2716 ERASE":"\u2716 ERASE"}</button>
           <button onClick={()=>setQuantize(q=>!q)} style={{padding:"4px 12px",background:quantize?"#162030":"#0c0f14",border:"2px solid "+(quantize?"#4488ff":"#252930"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:quantize?"#4488ff":"#333"}}>{"\u266A"} {quantize?"QUANT":"FREE"}</button>
+          <div style={{width:1,height:20,background:"#252930"}}/>
+          {!midiConnected ? (
+            <button onClick={connectMidi} style={{padding:"4px 12px",background:"#0c0f14",border:"2px solid #252930",borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:"#555"}}>{"\uD83C\uDFB9"} MIDI</button>
+          ) : (
+            <>
+              <button style={{padding:"4px 10px",background:"#0a1a10",border:"2px solid #1a5a2a",borderRadius:4,fontSize:9,fontWeight:"bold",color:"#22cc55",cursor:"default"}}>{"\uD83C\uDFB9"} MIDI {"\u2713"}</button>
+              <button onClick={()=>setMidiLearn(prev => prev !== null ? null : "waiting")} style={{padding:"4px 10px",background:midiLearn!==null?"#2a1a30":"#0c0f14",border:"2px solid "+(midiLearn!==null?"#aa44ff":"#252930"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:midiLearn!==null?"#cc66ff":"#555",animation:midiLearn!==null?"midipulse 1.2s infinite":"none"}}>LEARN</button>
+            </>
+          )}
         </div>
       </div>
       <div style={{padding:"16px 10px 8px",overflowX:"auto"}}>
@@ -576,7 +685,7 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
             const keyBg=isHeld?`linear-gradient(180deg,${fx.color}dd,${fx.color}88)`:isActive?`linear-gradient(180deg,#e8eaf0 0%,#d0d4de ${(1-fillPct)*100}%,${fx.color}aa ${(1-fillPct)*100}%,${fx.color}77 100%)`:`linear-gradient(180deg,#d4d8e0,#aeb4c0)`;
             return (
               <div key={fx.id} style={{position:"absolute",left:x,top:0,width:WW}}>
-                <div onMouseDown={()=>handlePadPress(fx.id)} onMouseUp={()=>handlePadRelease(fx.id)} onMouseLeave={()=>handlePadRelease(fx.id)}
+                <div onMouseDown={()=>{if(midiLearn==="waiting"){setMidiLearn(fx.id);return;}handlePadPress(fx.id);}} onMouseUp={()=>{if(midiLearn!==null)return;handlePadRelease(fx.id);}} onMouseLeave={()=>{if(midiLearn!==null)return;handlePadRelease(fx.id);}}
                   style={{width:WW,height:WH,borderRadius:"3px 3px 8px 8px",background:keyBg,border:isHeld?`2px solid ${fx.color}`:isActive?`1px solid ${fx.color}bb`:"1px solid #7a7e8a",boxShadow:isHeld?`0 0 22px ${fx.color}bb,0 4px 0 #000`:isActive?`0 0 ${10+glowStr*18}px ${fx.color}77,0 6px 0 #111`:"0 6px 0 #111",cursor:mode?"pointer":"default",position:"relative",overflow:"hidden",transform:isHeld?"translateY(3px)":"translateY(0)",transition:isHeld?"none":"all 0.06s",userSelect:"none"}}>
                   <div style={{position:"absolute",top:6,left:"50%",transform:"translateX(-50%)",width:20,height:20,borderRadius:3,background:isActive?fx.color:"rgba(0,0,0,0.18)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:"bold",color:isActive?"#000":"#777"}}>{fx.id}</div>
                   <div style={{position:"absolute",top:28,left:0,right:0,bottom:18,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -585,6 +694,8 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
                   <div style={{position:"absolute",bottom:5,left:0,right:0,textAlign:"center",fontSize:8,fontWeight:"bold",color:isActive?"#111":"#666"}}>{isActive&&liveVal!==undefined?Math.round(liveVal):padVal}{param.unit}</div>
                   {mode==="rec"&&<div style={{position:"absolute",top:4,right:4,width:6,height:6,borderRadius:"50%",background:"#ff2200",animation:"pulse 1s infinite"}}/>}
                   {mode==="erase"&&hasParam&&<div style={{position:"absolute",top:4,right:4,width:6,height:6,borderRadius:"50%",background:"#ff6600"}}/>}
+                  {midiLearn===fx.id&&<div style={{position:"absolute",inset:0,borderRadius:"3px 3px 8px 8px",border:"2px solid #cc66ff",animation:"midilearn 0.8s infinite",display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(170,68,255,0.15)",zIndex:5}}><span style={{fontSize:8,color:"#cc66ff",fontWeight:"bold"}}>PRESS KEY</span></div>}
+                  {reverseMidiMap[fx.id]!==undefined&&midiLearn!==fx.id&&<div style={{position:"absolute",top:4,left:4,padding:"1px 3px",background:"#1a0a2a",border:"1px solid #7733aa",borderRadius:2,fontSize:7,color:"#bb88ee",fontWeight:"bold",zIndex:4}}>{noteName(reverseMidiMap[fx.id])}</div>}
                   <div style={{position:"absolute",bottom:0,left:4,right:4,height:3,borderRadius:"0 0 6px 6px",background:isHeld?fx.color+"88":isActive?fx.color+"55":"rgba(0,0,0,0.1)"}}/>
                 </div>
                 <div style={{marginTop:4,height:3,background:"#0c0e12",borderRadius:2,overflow:"hidden"}}>
