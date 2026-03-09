@@ -883,59 +883,66 @@ function LightingTimeline() {
     setCuesRaw(prev);
   }, []);
   const handleDissolve = useCallback(() => {
+    const curSel = selectedCuesRef.current;
     setCues(prev => {
-      const sel = prev.filter(c => selectedCues.has(c.id));
+      const sel = prev.filter(c => curSel.has(c.id));
       if(sel.length < 2) return prev;
-      // Group by fixture+param lane
-      const groups = {};
-      sel.forEach(c => {
-        const key = `${c.fixtureId}-${c.param}`;
-        if(!groups[key]) groups[key] = [];
-        groups[key].push(c);
-      });
+      // Sort all selected by beat
+      sel.sort((a, b) => a.beat - b.beat);
+      // Create a dissolve cue between each consecutive pair
+      const newCues = [];
+      for(let i = 0; i < sel.length - 1; i++) {
+        const cur = sel[i];
+        const next = sel[i + 1];
+        const curEnd = cur.beat + cur.duration;
+        const nextStart = next.beat;
+        const startVal = cur.value;
+        const endVal = next.value;
+        const beat = curEnd;
+        const dur = Math.max(0.5, nextStart - curEnd);
+        const same = startVal === endVal;
+        newCues.push({
+          id: genId(),
+          fixtureId: cur.fixtureId,
+          param: cur.param,
+          beat: beat,
+          duration: dur,
+          value: endVal,
+          easing: same ? "linear" : "sCurve",
+          fadeIn: same ? 0 : 1,
+          fadeOut: 0,
+          startValue: startVal,
+          endValue: endVal,
+        });
+      }
+      // Update adjacent selected cues so they stay flat where dissolve connects
       const updates = {};
-      Object.values(groups).forEach(group => {
-        if(group.length < 2) return;
-        group.sort((a, b) => a.beat - b.beat);
-        // Stretch cues to touch each other and add crossfade
-        for(let i = 0; i < group.length; i++) {
-          const cur = group[i];
-          const next = group[i + 1];
-          const prev2 = group[i - 1];
-          const curEnd = cur.beat + cur.duration;
-          // Stretch current cue to reach next cue's start
-          let newDuration = cur.duration;
-          if(next) {
-            const gap = next.beat - curEnd;
-            if(gap > 0) newDuration = cur.duration + gap;
+      for(let i = 0; i < sel.length - 1; i++) {
+        const cur = sel[i];
+        const next = sel[i + 1];
+        // First cue: make endValue match its value (stay flat at end)
+        updates[cur.id] = { ...(updates[cur.id]||{}), endValue: cur.value, fadeOut: 0 };
+        // Next cue: make startValue match its value (stay flat at start)
+        updates[next.id] = { ...(updates[next.id]||{}), startValue: next.value, fadeIn: 0 };
+      }
+      // Remove existing cues that overlap with any new dissolve cue on the same lane
+      const selIds = new Set(sel.map(c => c.id));
+      const filtered = prev.filter(c => {
+        if(selIds.has(c.id)) return true;
+        for(const nc of newCues) {
+          if(c.fixtureId === nc.fixtureId && c.param === nc.param) {
+            const cEnd = c.beat + c.duration;
+            const ncEnd = nc.beat + nc.duration;
+            if(c.beat < ncEnd && cEnd > nc.beat) return false;
           }
-          // Calculate crossfade overlap as fraction of duration
-          let fadeIn = 0, fadeOut = 0;
-          if(prev2) {
-            // Fade in from previous cue's value
-            const overlap = Math.min(newDuration * 0.4, newDuration * 0.5);
-            fadeIn = overlap / newDuration;
-          }
-          if(next) {
-            const overlap = Math.min(newDuration * 0.4, newDuration * 0.5);
-            fadeOut = overlap / newDuration;
-          }
-          updates[cur.id] = {
-            duration: newDuration,
-            fadeIn: fadeIn,
-            fadeOut: fadeOut,
-            easing: "sCurve",
-            startValue: prev2 ? prev2.value : cur.startValue ?? cur.value,
-            endValue: next ? next.value : cur.endValue ?? cur.value,
-          };
         }
+        return true;
       });
-      if(Object.keys(updates).length === 0) return prev;
-      return prev.map(c => updates[c.id] ? {...c, ...updates[c.id]} : c);
+      return filtered.map(c => updates[c.id] ? {...c, ...updates[c.id]} : c).concat(newCues);
     });
     setSelectedCues(new Set());
     setSelectedCue(null);
-  }, [selectedCues, setCues]);
+  }, [setCues]);
   const [playing,setPlaying] = useState(false);
   const [playhead,setPlayhead] = useState(0);
   const [loopStart,setLoopStart] = useState(0);
@@ -944,6 +951,8 @@ function LightingTimeline() {
   const [zoom,setZoom] = useState(1);
   const [selectedCue,setSelectedCue] = useState(null);
   const [selectedCues,setSelectedCues] = useState(new Set());
+  const selectedCuesRef = useRef(new Set());
+  useEffect(() => { selectedCuesRef.current = selectedCues; }, [selectedCues]);
   const [boxSelect,setBoxSelect] = useState(null);
   const [dragging,setDragging] = useState(null);
   const [resizing,setResizing] = useState(null);
@@ -1242,6 +1251,7 @@ function LightingTimeline() {
 @keyframes sparkletext{0%,100%{text-shadow:0 0 4px currentColor}30%{text-shadow:0 0 8px currentColor,0 0 16px currentColor}60%{text-shadow:0 0 2px currentColor}80%{text-shadow:0 0 12px currentColor,0 0 20px currentColor}}
 @keyframes shimmer{0%{background-position:200% center}100%{background-position:-200% center}}
 @keyframes eraseglow{0%{box-shadow:0 0 4px #ff444444,0 0 8px #ff444422,inset 0 0 6px #ff444411;border-color:#ff444488}25%{box-shadow:0 0 12px #ff444488,0 0 24px #ff444444,0 0 36px #ff444422,inset 0 0 10px #ff444422;border-color:#ff4444cc}50%{box-shadow:0 0 6px #ff444455,0 0 14px #ff444433,inset 0 0 8px #ff444415;border-color:#ff444499}75%{box-shadow:0 0 16px #ff4444aa,0 0 30px #ff444455,0 0 44px #ff444422,inset 0 0 12px #ff444433;border-color:#ff4444dd}100%{box-shadow:0 0 4px #ff444444,0 0 8px #ff444422,inset 0 0 6px #ff444411;border-color:#ff444488}}
+@keyframes selectglow{0%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}25%{box-shadow:0 0 12px #44ffaa88,0 0 24px #44ffaa44,0 0 36px #44ffaa22,inset 0 0 10px #44ffaa22;border-color:#44ffaacc}50%{box-shadow:0 0 6px #44ffaa55,0 0 14px #44ffaa33,inset 0 0 8px #44ffaa15;border-color:#44ffaa99}75%{box-shadow:0 0 16px #44ffaaaa,0 0 30px #44ffaa55,0 0 44px #44ffaa22,inset 0 0 12px #44ffaa33;border-color:#44ffaadd}100%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}}
 @keyframes seqstore{0%,100%{box-shadow:0 0 4px #e8aa2244;border-color:#e8aa2288;background:#1a150066}50%{box-shadow:0 0 10px #e8aa2288,0 0 20px #e8aa2244;border-color:#e8aa22;background:#2a1a0088}}
 @keyframes seqclear{0%,100%{box-shadow:0 0 4px #ff554444;border-color:#ff554488;background:#1c0f0f66}50%{box-shadow:0 0 10px #ff554488,0 0 20px #ff554444;border-color:#ff5544;background:#2a0f0f88}}`}</style>
       <div style={{height:46,background:"#1e2230",borderBottom:"1px solid #2e3440",display:"flex",alignItems:"center",padding:"0 14px",gap:10,flexShrink:0}}>
@@ -1261,7 +1271,7 @@ function LightingTimeline() {
         <button onClick={()=>setLoopEnabled(v=>!v)} style={{background:loopEnabled?"#162a1e":"#1e222a",border:"1px solid "+(loopEnabled?"#44ffaa66":"#2e3340"),color:loopEnabled?"#44ffaa":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u21BB"} LOOP</button>
         <button onClick={()=>setSnapToGrid(v=>!v)} style={{background:snapToGrid?"#162030":"#1e222a",border:"1px solid "+(snapToGrid?"#4488ff66":"#2e3340"),color:snapToGrid?"#4488ff":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u25A6"} SNAP</button>
         {[{id:"select",icon:"\u2190"},{id:"draw",icon:"\u270E"},{id:"erase",icon:"\u2716"}].map(t=>(
-          <button key={t.id} onClick={()=>setTool(t.id)} style={{background:t.id==="erase"&&tool===t.id?"linear-gradient(135deg,#3a1a1a,#662222aa,#3a1a1a)":(tool===t.id?"#e8aa22":"#1e222a"),backgroundSize:t.id==="erase"&&tool===t.id?"400% 100%":"auto",border:"1px solid "+(t.id==="erase"&&tool===t.id?"#ff4444":tool===t.id?"#e8aa22":"#2e3340"),color:t.id==="erase"&&tool===t.id?"#ff4444":(tool===t.id?"#111":"#777"),borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,animation:t.id==="erase"&&tool===t.id?"eraseglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":"none",transition:"all 0.3s ease"}}>{t.icon}</button>
+          <button key={t.id} onClick={()=>setTool(t.id)} style={{background:t.id==="erase"&&tool===t.id?"linear-gradient(135deg,#3a1a1a,#662222aa,#3a1a1a)":(t.id==="select"&&tool===t.id?"linear-gradient(135deg,#1a2a1a,#44ffaa33,#1a2a1a)":(tool===t.id?"#e8aa22":"#1e222a")),backgroundSize:(t.id==="erase"||t.id==="select")&&tool===t.id?"400% 100%":"auto",border:"1px solid "+(t.id==="erase"&&tool===t.id?"#ff4444":t.id==="select"&&tool===t.id?"#44ffaa":tool===t.id?"#e8aa22":"#2e3340"),color:t.id==="erase"&&tool===t.id?"#ff4444":(t.id==="select"&&tool===t.id?"#44ffaa":(tool===t.id?"#111":"#777")),borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,animation:t.id==="erase"&&tool===t.id?"eraseglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":(t.id==="select"&&tool===t.id?"selectglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":"none"),transition:"all 0.3s ease",boxShadow:t.id==="select"&&tool===t.id?"0 0 12px #44ffaa44, inset 0 0 8px #44ffaa22":"none"}}>{t.icon}</button>
         ))}
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCue(null);}else{setCopyMode(true);}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCue?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCue?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCue?"PASTE":"COPY"):"COPY"}</button>
         <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e222a",border:"1px solid "+(undoHistoryRef.current.length?"#e8aa2266":"#2e3340"),color:undoHistoryRef.current.length?"#e8aa22":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
