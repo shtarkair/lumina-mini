@@ -362,6 +362,74 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
 
   const isBallyhoo = effectType === "ballyhoo";
 
+  const previewData = useMemo(() => {
+    let fixtures = FIXTURES.filter(f => selFixtures.has(f.id));
+    if (fixtures.length === 0 || fxEnd <= fxStart) return [];
+    if (direction === "bwd") fixtures = [...fixtures].reverse();
+    const previewCues = generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade,
+      rangeMin: param.min, rangeMax: param.max, easing, startBeat: fxStart, endBeat: fxEnd });
+    if (previewCues.length === 0) return [];
+
+    const dur = fxEnd - fxStart;
+    const samples = 200;
+
+    if (isBallyhoo) {
+      // Ballyhoo generates both pan and tilt cues — show both as separate line sets
+      const panParam = getParam("pan"), tiltParam = getParam("tilt");
+      const panCues = {}, tiltCues = {};
+      previewCues.forEach(c => {
+        if (c.param === "pan") (panCues[c.fixtureId] = panCues[c.fixtureId] || []).push(c);
+        else if (c.param === "tilt") (tiltCues[c.fixtureId] = tiltCues[c.fixtureId] || []).push(c);
+      });
+      const lines = [];
+      fixtures.forEach(fx => {
+        // Pan line (solid)
+        const pCues = panCues[fx.id] || [];
+        const panRange = panParam.max - panParam.min;
+        const panPts = [];
+        for (let i = 0; i <= samples; i++) {
+          const beat = fxStart + (i / samples) * dur;
+          let val = panParam.min;
+          for (const c of pCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
+          const norm = panRange > 0 ? (val - panParam.min) / panRange : 0;
+          panPts.push({ x: i / samples, y: 1 - norm });
+        }
+        lines.push({ fixtureId: fx.id, color: fx.color, name: fx.name + " Pan", points: panPts, dash: false });
+        // Tilt line (dashed)
+        const tCues = tiltCues[fx.id] || [];
+        const tiltRange = tiltParam.max - tiltParam.min;
+        const tiltPts = [];
+        for (let i = 0; i <= samples; i++) {
+          const beat = fxStart + (i / samples) * dur;
+          let val = tiltParam.min;
+          for (const c of tCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
+          const norm = tiltRange > 0 ? (val - tiltParam.min) / tiltRange : 0;
+          tiltPts.push({ x: i / samples, y: 1 - norm });
+        }
+        lines.push({ fixtureId: fx.id + "_tilt", color: fx.color, name: fx.name + " Tilt", points: tiltPts, dash: true });
+      });
+      return lines;
+    }
+
+    // Standard single-param effects
+    const byFixture = {};
+    previewCues.forEach(c => { (byFixture[c.fixtureId] = byFixture[c.fixtureId] || []).push(c); });
+    const range = param.max - param.min;
+
+    return fixtures.map(fx => {
+      const fxCues = byFixture[fx.id] || [];
+      const points = [];
+      for (let i = 0; i <= samples; i++) {
+        const beat = fxStart + (i / samples) * dur;
+        let val = param.min;
+        for (const c of fxCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
+        const norm = range > 0 ? (val - param.min) / range : 0;
+        points.push({ x: i / samples, y: 1 - norm });
+      }
+      return { fixtureId: fx.id, color: fx.color, name: fx.name, points, dash: false };
+    });
+  }, [selFixtures, paramId, effectType, speed, offset, crossfade, easing, direction, fxStart, fxEnd, param, isBallyhoo]);
+
   return (
     <div style={{padding:8,display:"flex",flexDirection:"column",gap:8,fontSize:9}}>
       <div>
@@ -432,6 +500,39 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
           <div style={{fontSize:8,color:"#bb44ff88",letterSpacing:2}}>FX RANGE: {fxStart} → {fxEnd} <span style={{color:"#bb44ff55"}}>(drag purple markers)</span></div>
         </div>
       </div>
+
+      {previewData.length > 0 && <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
+        <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>PREVIEW</div>
+        <div style={{position:"relative",background:"#080a0e",border:"1px solid #1e222a",borderRadius:4,overflow:"hidden"}}>
+          <svg width="100%" height={120} viewBox="0 0 400 120" preserveAspectRatio="none" style={{display:"block"}}>
+            {Array.from({length: Math.ceil(fxEnd - fxStart) + 1}, (_, i) => {
+              const x = (i / (fxEnd - fxStart)) * 400;
+              return <line key={"g"+i} x1={x} y1={0} x2={x} y2={120} stroke="#1e222a" strokeWidth={1}/>;
+            })}
+            {Array.from({length: Math.ceil((fxEnd - fxStart) / speed)}, (_, i) => {
+              const x = ((i * speed) / (fxEnd - fxStart)) * 400;
+              return <line key={"c"+i} x1={x} y1={0} x2={x} y2={120} stroke="#e8aa2233" strokeWidth={1} strokeDasharray="3,3"/>;
+            })}
+            {previewData.map(fd => {
+              const pathD = fd.points.map((p, i) => `${i===0?"M":"L"}${(p.x*400).toFixed(1)},${(p.y*112+4).toFixed(1)}`).join(" ");
+              return <path key={fd.fixtureId} d={pathD} fill="none" stroke={fd.color} strokeWidth={1.5} opacity={0.8} strokeDasharray={fd.dash?"4,3":undefined}/>;
+            })}
+          </svg>
+          <div style={{position:"absolute",bottom:2,left:0,right:0,display:"flex",justifyContent:"space-between",padding:"0 4px"}}>
+            <span style={{fontSize:7,color:"#444"}}>{fxStart}</span>
+            <span style={{fontSize:7,color:"#333"}}>beats</span>
+            <span style={{fontSize:7,color:"#444"}}>{fxEnd}</span>
+          </div>
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
+          {previewData.map(fd => (
+            <div key={fd.fixtureId} style={{display:"flex",alignItems:"center",gap:3}}>
+              <div style={{width:6,height:6,borderRadius:3,background:fd.color,border:fd.dash?"1px dashed "+fd.color:"none"}}/>
+              <span style={{fontSize:7,color:fd.color+"aa"}}>{fd.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>}
 
       <button onClick={handleApply} style={{padding:"6px 0",background:"#e8aa2233",border:"2px solid #e8aa22",color:"#e8aa22",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",letterSpacing:2}}>APPLY FX</button>
       {lastBatchId && <button onClick={handleUndo} style={{padding:"4px 0",background:"#ff333318",border:"1px solid #ff333366",color:"#ff5544",borderRadius:3,cursor:"pointer",fontSize:9,letterSpacing:1}}>UNDO LAST FX</button>}
@@ -1352,7 +1453,13 @@ function LightingTimeline() {
     }
     if(tool==="erase"){setCues(prev=>prev.filter(c=>c.id!==cue.id));return;}
     setSelectedCue(cue.id);
-    if(e.target.dataset.resize) setResizing({id:cue.id,startX:e.clientX,startDuration:cue.duration});
+    if(e.target.dataset.resize){
+      if(selectedCues.has(cue.id)&&selectedCues.size>1){
+        const startDurations={};
+        cues.forEach(c=>{if(selectedCues.has(c.id))startDurations[c.id]=c.duration;});
+        setResizing({id:cue.id,startX:e.clientX,startDuration:cue.duration,multi:true,startDurations});
+      } else setResizing({id:cue.id,startX:e.clientX,startDuration:cue.duration});
+    }
     else if(selectedCues.has(cue.id)&&selectedCues.size>1){
       // Multi-drag: store start beats for all selected cues
       const startBeats={};
@@ -1364,7 +1471,7 @@ function LightingTimeline() {
   useEffect(()=>{
     const onMove=e=>{
       if(dragging){const db=xToBeat(e.clientX-dragging.startX);if(dragging.multi){setCues(prev=>prev.map(c=>dragging.startBeats[c.id]!=null?{...c,beat:snapBeat(Math.max(0,dragging.startBeats[c.id]+db))}:c));}else{setCues(prev=>prev.map(c=>c.id===dragging.id?{...c,beat:snapBeat(Math.max(0,dragging.startBeat+db))}:c));}}
-      if(resizing){const db=xToBeat(e.clientX-resizing.startX);setCues(prev=>prev.map(c=>c.id===resizing.id?{...c,duration:Math.max(0.25,snapBeat(resizing.startDuration+db))}:c));}
+      if(resizing){const db=xToBeat(e.clientX-resizing.startX);if(resizing.multi){setCues(prev=>prev.map(c=>resizing.startDurations[c.id]!=null?{...c,duration:Math.max(0.25,snapBeat(resizing.startDurations[c.id]+db))}:c));}else{setCues(prev=>prev.map(c=>c.id===resizing.id?{...c,duration:Math.max(0.25,snapBeat(resizing.startDuration+db))}:c));}}
       if(boxSelect&&timelineRef.current){
         const rect=timelineRef.current.getBoundingClientRect();
         const x=e.clientX-rect.left-LABEL_W-PARAM_LABEL_W+timelineRef.current.scrollLeft;
