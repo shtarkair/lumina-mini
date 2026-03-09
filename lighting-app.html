@@ -81,6 +81,59 @@ const FIXTURES = [
   { id:8, name:"Fog",       color:"#44ffaa", type:"FX"     },
 ];
 
+// DMX profiles: map fixture types to channel layouts
+const DMX_PROFILES = {
+  SPOT: { channels:22, map:{ dimmer:{offset:0,bits:16}, pan:{offset:2,bits:16}, tilt:{offset:4,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, white:{offset:9,bits:8}, colorwheel:{offset:10,bits:8}, zoom:{offset:11,bits:8}, iris:{offset:12,bits:8}, focus:{offset:13,bits:8}, blade_a:{offset:14,bits:8}, blade_b:{offset:15,bits:8}, blade_c:{offset:16,bits:8}, blade_d:{offset:17,bits:8}, blade_rot:{offset:18,bits:16}, gobo_a:{offset:20,bits:8}, gobo_a_rot:{offset:21,bits:8} }},
+  WASH: { channels:12, map:{ dimmer:{offset:0,bits:16}, pan:{offset:2,bits:16}, tilt:{offset:4,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, white:{offset:9,bits:8}, zoom:{offset:10,bits:8}, strobe:{offset:11,bits:8} }},
+  STROBE: { channels:3, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8}, colorwheel:{offset:2,bits:8} }},
+  LED: { channels:8, map:{ dimmer:{offset:0,bits:8}, cyan:{offset:1,bits:8}, magenta:{offset:2,bits:8}, yellow:{offset:3,bits:8}, white:{offset:4,bits:8}, strobe:{offset:5,bits:8}, zoom:{offset:6,bits:8}, colorwheel:{offset:7,bits:8} }},
+  FX: { channels:2, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8} }},
+};
+
+function generateDefaultPatch() {
+  const patch = {};
+  let addr = 1;
+  FIXTURES.forEach(fx => {
+    const profile = DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT;
+    patch[fx.id] = { universe:1, address:addr, profile:fx.type };
+    addr += profile.channels;
+  });
+  return patch;
+}
+
+function scaleParam(paramId, logicalValue, bits) {
+  const p = getParam(paramId);
+  if (!p) return 0;
+  const norm = Math.max(0, Math.min(1, (logicalValue - p.min) / Math.max(1, p.max - p.min)));
+  return bits === 16 ? Math.round(norm * 65535) : Math.round(norm * 255);
+}
+
+function buildDMXFrames(liveValues, dmxPatch) {
+  const universes = {};
+  for (const [key, val] of Object.entries(liveValues)) {
+    const idx = key.indexOf("-");
+    const fxId = parseInt(key.substring(0, idx));
+    const paramId = key.substring(idx + 1);
+    const patch = dmxPatch[fxId];
+    if (!patch) continue;
+    const profile = DMX_PROFILES[patch.profile];
+    if (!profile || !profile.map[paramId]) continue;
+    const { offset, bits } = profile.map[paramId];
+    const addr = patch.address + offset;
+    if (addr < 1 || addr > 512) continue;
+    if (!universes[patch.universe]) universes[patch.universe] = new Array(512).fill(0);
+    const frame = universes[patch.universe];
+    const scaled = scaleParam(paramId, val, bits);
+    if (bits === 16 && addr < 512) {
+      frame[addr - 1] = (scaled >> 8) & 0xFF;
+      frame[addr] = scaled & 0xFF;
+    } else {
+      frame[addr - 1] = scaled & 0xFF;
+    }
+  }
+  return universes;
+}
+
 const BEAT_WIDTH=40, LANE_H=34, FIXTURE_HDR_H=28, GROUP_HDR_H=20, RULER_H=36, LABEL_W=130, PARAM_LABEL_W=100, TOTAL_BEATS=64;
 function genId() { return Math.random().toString(36).substr(2,9); }
 
@@ -1096,6 +1149,16 @@ function LightingTimeline() {
   const [seqClearMode,setSeqClearMode] = useState(false);
   const [seqRecallMode,setSeqRecallMode] = useState("merge");
   const [lastRecalledBatchId,setLastRecalledBatchId] = useState(null);
+
+  // Output engine state
+  const [dmxPatch, setDmxPatch] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(); } catch(e) { return generateDefaultPatch(); }
+  });
+  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"255.255.255.255", dmxRate:25 });
+  const [outputConnected, setOutputConnected] = useState(false);
+  const dmxPatchRef = useRef(dmxPatch);
+  useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
+
   const shiftTimerRef = useRef(null);
   const beatEventRef = useRef(null);
 
@@ -1168,6 +1231,54 @@ function LightingTimeline() {
     cues.forEach(c=>{if(playhead>=c.beat&&playhead<c.beat+c.duration) map[`${c.fixtureId}-${c.param}`]=interpolateCue(c,playhead);});
     return map;
   },[cues,playhead]);
+
+  // Output engine: send liveValues → WebSocket → bridge server → ArtNet/sACN
+  const liveValuesRef = useRef({});
+  useEffect(() => { liveValuesRef.current = liveValues; }, [liveValues]);
+  const outputWsRef = useRef(null);
+  const outputReconnectRef = useRef(null);
+
+  useEffect(() => {
+    if (!outputConfig.enabled) {
+      if (outputWsRef.current) { outputWsRef.current.close(); outputWsRef.current = null; }
+      if (outputReconnectRef.current) { clearTimeout(outputReconnectRef.current); outputReconnectRef.current = null; }
+      setOutputConnected(false);
+      return;
+    }
+    let closed = false;
+    const connect = () => {
+      if (closed) return;
+      try {
+        const ws = new WebSocket(`ws://${location.host}`);
+        ws.onopen = () => { setOutputConnected(true); ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost })); };
+        ws.onclose = () => { setOutputConnected(false); if (!closed) outputReconnectRef.current = setTimeout(connect, 2000); };
+        ws.onerror = () => ws.close();
+        outputWsRef.current = ws;
+      } catch(e) { if (!closed) outputReconnectRef.current = setTimeout(connect, 2000); }
+    };
+    connect();
+    return () => { closed = true; if (outputWsRef.current) outputWsRef.current.close(); if (outputReconnectRef.current) clearTimeout(outputReconnectRef.current); };
+  }, [outputConfig.enabled]);
+
+  // Send config updates when protocol settings change
+  useEffect(() => {
+    if (outputWsRef.current?.readyState === WebSocket.OPEN) {
+      outputWsRef.current.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost }));
+    }
+  }, [outputConfig.artnet, outputConfig.sacn, outputConfig.artnetHost]);
+
+  // Output loop: build DMX frames and send at configured rate
+  useEffect(() => {
+    if (!outputConfig.enabled) return;
+    const iv = setInterval(() => {
+      const ws = outputWsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
+      if (Object.keys(universes).length === 0) return;
+      ws.send(JSON.stringify({ type:"dmx_frame", universes }));
+    }, outputConfig.dmxRate);
+    return () => clearInterval(iv);
+  }, [outputConfig.enabled, outputConfig.dmxRate]);
 
   const rows=[];
   let yOff=0;
@@ -1522,7 +1633,7 @@ function LightingTimeline() {
 
         <div style={{width:rightPanelWide?440:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
           <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
-            {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"}].map(tab=>(
+            {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"},{id:"out",label:"OUT"}].map(tab=>(
               <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1c2030":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #e8aa22":"2px solid transparent",color:rightTab===tab.id?"#e8aa22":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
             ))}
           </div>
@@ -1581,8 +1692,62 @@ function LightingTimeline() {
               )
             ):rightTab==="fx"?(
               <EffectGenerator setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
-            ):(
+            ):rightTab==="seq"?(
               <SequenceStoragePanel sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
+            ):(
+              <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setOutputConfig(c=>({...c,enabled:!c.enabled}))} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:outputConfig.enabled?"#0a2a1a":"#0c0e12",border:"2px solid "+(outputConfig.enabled?"#22cc55":"#252930"),color:outputConfig.enabled?"#22cc55":"#555",borderRadius:4,cursor:"pointer"}}>{outputConfig.enabled?"OUTPUT ON":"OUTPUT OFF"}</button>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:outputConnected?"#22cc55":outputConfig.enabled?"#ff4422":"#333",boxShadow:outputConnected?"0 0 8px #22cc5588":"none"}}/>
+                </div>
+
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>PROTOCOLS</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+                    <input type="checkbox" checked={outputConfig.artnet} onChange={e=>setOutputConfig(c=>({...c,artnet:e.target.checked}))} style={{accentColor:"#ff8844"}}/>
+                    <span style={{fontSize:10,color:outputConfig.artnet?"#ff8844":"#555",fontWeight:"bold"}}>ArtNet</span>
+                    <span style={{fontSize:8,color:"#333",marginLeft:"auto"}}>UDP 6454</span>
+                  </label>
+                  {outputConfig.artnet && (
+                    <div style={{marginLeft:20,display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:8,color:"#555"}}>Host:</span>
+                      <input value={outputConfig.artnetHost} onChange={e=>setOutputConfig(c=>({...c,artnetHost:e.target.value}))} style={{flex:1,background:"#0c0e12",border:"1px solid #252930",color:"#ff8844",borderRadius:3,padding:"2px 6px",fontSize:10}}/>
+                    </div>
+                  )}
+                  <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+                    <input type="checkbox" checked={outputConfig.sacn} onChange={e=>setOutputConfig(c=>({...c,sacn:e.target.checked}))} style={{accentColor:"#4488ff"}}/>
+                    <span style={{fontSize:10,color:outputConfig.sacn?"#4488ff":"#555",fontWeight:"bold"}}>sACN / E1.31</span>
+                    <span style={{fontSize:8,color:"#333",marginLeft:"auto"}}>Multicast</span>
+                  </label>
+                </div>
+
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX RATE</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <input type="range" min={10} max={50} value={outputConfig.dmxRate} onChange={e=>setOutputConfig(c=>({...c,dmxRate:+e.target.value}))} style={{flex:1,accentColor:"#ff8844"}}/>
+                  <span style={{fontSize:9,color:"#ff8844",width:40,textAlign:"right"}}>{Math.round(1000/outputConfig.dmxRate)}Hz</span>
+                </div>
+
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX PATCH</div>
+                <button onClick={()=>setDmxPatch(generateDefaultPatch())} style={{padding:"4px 0",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#777",borderRadius:3,cursor:"pointer",letterSpacing:1}}>AUTO PATCH</button>
+                <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:200,overflowY:"auto"}}>
+                  {FIXTURES.map(fx => {
+                    const p = dmxPatch[fx.id] || {universe:1,address:1,profile:fx.type};
+                    const prof = DMX_PROFILES[p.profile];
+                    return (
+                      <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 4px",background:"#0c0e12",borderRadius:3,border:"1px solid #1a1d22"}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:fx.color,flexShrink:0}}/>
+                        <span style={{fontSize:8,color:"#888",width:50,overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
+                        <span style={{fontSize:7,color:"#444"}}>U</span>
+                        <input type="number" min={1} max={32768} value={p.universe} onChange={e=>setDmxPatch(prev=>({...prev,[fx.id]:{...p,universe:Math.max(1,+e.target.value)}}))} style={{width:28,background:"#080a0e",border:"1px solid #1e222a",color:"#ff8844",borderRadius:2,padding:"1px 3px",fontSize:9,textAlign:"center"}}/>
+                        <span style={{fontSize:7,color:"#444"}}>A</span>
+                        <input type="number" min={1} max={512} value={p.address} onChange={e=>setDmxPatch(prev=>({...prev,[fx.id]:{...p,address:Math.max(1,Math.min(512,+e.target.value))}}))} style={{width:32,background:"#080a0e",border:"1px solid #1e222a",color:"#ff8844",borderRadius:2,padding:"1px 3px",fontSize:9,textAlign:"center"}}/>
+                        <span style={{fontSize:7,color:"#333",marginLeft:"auto"}}>{prof?prof.channels:0}ch</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
           <div style={{borderTop:"1px solid #252930",padding:"8px 12px"}}>
@@ -1600,7 +1765,7 @@ function LightingTimeline() {
       <FixturePadBar cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
 
       <div style={{height:22,background:"#141820",borderTop:"1px solid #252930",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
-        {[{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'}].map(item=>(
+        {[{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"}].map(item=>(
           <span key={item.label} style={{fontSize:8,color:"#444"}}>
             <span style={{color:"#252930",marginRight:4}}>{item.label}</span>
             <span style={{color:"#666"}}>{item.val}</span>
