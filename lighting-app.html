@@ -70,16 +70,19 @@ const PARAM_GROUPS = [
 const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
-const FIXTURES = [
-  { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
-  { id:2, name:"Spot 2",    color:"#ff5544", type:"SPOT"   },
-  { id:3, name:"Wash 1",    color:"#44aaff", type:"WASH"   },
-  { id:4, name:"Wash 2",    color:"#44aaff", type:"WASH"   },
-  { id:5, name:"Strobe 1",  color:"#ffdd44", type:"STROBE" },
-  { id:6, name:"LED Bar 1", color:"#aa44ff", type:"LED"    },
-  { id:7, name:"LED Bar 2", color:"#aa44ff", type:"LED"    },
-  { id:8, name:"Fog",       color:"#44ffaa", type:"FX"     },
-];
+const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa" };
+function defaultFixtures() {
+  return [
+    { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
+    { id:2, name:"Spot 2",    color:"#ff5544", type:"SPOT"   },
+    { id:3, name:"Wash 1",    color:"#44aaff", type:"WASH"   },
+    { id:4, name:"Wash 2",    color:"#44aaff", type:"WASH"   },
+    { id:5, name:"Strobe 1",  color:"#ffdd44", type:"STROBE" },
+    { id:6, name:"LED Bar 1", color:"#aa44ff", type:"LED"    },
+    { id:7, name:"LED Bar 2", color:"#aa44ff", type:"LED"    },
+    { id:8, name:"Fog",       color:"#44ffaa", type:"FX"     },
+  ];
+}
 
 // DMX profiles: map fixture types to channel layouts
 const DMX_PROFILES = {
@@ -90,10 +93,10 @@ const DMX_PROFILES = {
   FX: { channels:2, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8} }},
 };
 
-function generateDefaultPatch() {
+function generateDefaultPatch(fixtures) {
   const patch = {};
   let addr = 1;
-  FIXTURES.forEach(fx => {
+  fixtures.forEach(fx => {
     const profile = DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT;
     const overrides = {};
     Object.entries(profile.map).forEach(([paramId, {offset, bits}]) => {
@@ -325,8 +328,8 @@ function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfad
   return cues;
 }
 
-function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
-  const [selFixtures, setSelFixtures] = useState(new Set([1,2,3,4]));
+function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
+  const [selFixtures, setSelFixtures] = useState(() => new Set(fixtures.slice(0,4).map(f=>f.id)));
   const [paramId, setParamId] = useState("dimmer");
   const [effectType, setEffectType] = useState("chase");
   const [speed, setSpeed] = useState(4);
@@ -338,20 +341,20 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
   const param = getParam(paramId);
 
   const toggleFx = id => setSelFixtures(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const selAll = () => setSelFixtures(new Set(FIXTURES.map(f => f.id)));
+  const selAll = () => setSelFixtures(new Set(fixtures.map(f => f.id)));
   const selNone = () => setSelFixtures(new Set());
 
   const handleApply = () => {
-    let fixtures = FIXTURES.filter(f => selFixtures.has(f.id));
-    if (direction === "bwd") fixtures = [...fixtures].reverse();
-    const newCues = generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade, rangeMin: param.min, rangeMax: param.max, easing, startBeat: fxStart, endBeat: fxEnd });
+    let fxList = fixtures.filter(f => selFixtures.has(f.id));
+    if (direction === "bwd") fxList = [...fxList].reverse();
+    const newCues = generateEffect({ effectType, fixtures:fxList, paramId, speed, offset, crossfade, rangeMin: param.min, rangeMax: param.max, easing, startBeat: fxStart, endBeat: fxEnd });
     if (newCues.length === 0) return;
     const bid = newCues[0].batchId;
     setLastBatchId(bid);
     setCues(prev => [...prev, ...newCues]);
-    setExpandedFixtures(new Set(fixtures.map(f => f.id)));
+    setExpandedFixtures(new Set(fxList.map(f => f.id)));
     const groupName = PARAM_GROUPS.find(g => g.params.some(p => p.id === paramId))?.group;
-    if (groupName) setExpandedGroups(new Set(fixtures.map(f => `${f.id}-${groupName}`)));
+    if (groupName) setExpandedGroups(new Set(fxList.map(f => `${f.id}-${groupName}`)));
   };
 
   const handleUndo = () => {
@@ -363,10 +366,10 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
   const isBallyhoo = effectType === "ballyhoo";
 
   const previewData = useMemo(() => {
-    let fixtures = FIXTURES.filter(f => selFixtures.has(f.id));
-    if (fixtures.length === 0 || fxEnd <= fxStart) return [];
-    if (direction === "bwd") fixtures = [...fixtures].reverse();
-    const previewCues = generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade,
+    let fxList = fixtures.filter(f => selFixtures.has(f.id));
+    if (fxList.length === 0 || fxEnd <= fxStart) return [];
+    if (direction === "bwd") fxList = [...fxList].reverse();
+    const previewCues = generateEffect({ effectType, fixtures:fxList, paramId, speed, offset, crossfade,
       rangeMin: param.min, rangeMax: param.max, easing, startBeat: fxStart, endBeat: fxEnd });
     if (previewCues.length === 0) return [];
 
@@ -382,7 +385,7 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
         else if (c.param === "tilt") (tiltCues[c.fixtureId] = tiltCues[c.fixtureId] || []).push(c);
       });
       const lines = [];
-      fixtures.forEach(fx => {
+      fxList.forEach(fx => {
         // Pan line (solid)
         const pCues = panCues[fx.id] || [];
         const panRange = panParam.max - panParam.min;
@@ -416,7 +419,7 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
     previewCues.forEach(c => { (byFixture[c.fixtureId] = byFixture[c.fixtureId] || []).push(c); });
     const range = param.max - param.min;
 
-    return fixtures.map(fx => {
+    return fxList.map(fx => {
       const fxCues = byFixture[fx.id] || [];
       const points = [];
       for (let i = 0; i <= samples; i++) {
@@ -428,7 +431,7 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
       }
       return { fixtureId: fx.id, color: fx.color, name: fx.name, points, dash: false };
     });
-  }, [selFixtures, paramId, effectType, speed, offset, crossfade, easing, direction, fxStart, fxEnd, param, isBallyhoo]);
+  }, [fixtures, selFixtures, paramId, effectType, speed, offset, crossfade, easing, direction, fxStart, fxEnd, param, isBallyhoo]);
 
   return (
     <div style={{padding:8,display:"flex",flexDirection:"column",gap:8,fontSize:9}}>
@@ -439,7 +442,7 @@ function EffectGenerator({ setCues, loopStart, loopEnd, fxStart, fxEnd, setExpan
           <button onClick={selNone} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>NONE</button>
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-          {FIXTURES.map(fx => {
+          {fixtures.map(fx => {
             const sel = selFixtures.has(fx.id);
             return <button key={fx.id} onClick={()=>toggleFx(fx.id)} style={{padding:"2px 5px",fontSize:8,background:sel?fx.color+"22":"#0c0e12",border:`1px solid ${sel?fx.color:"#252930"}`,color:sel?fx.color:"#444",borderRadius:3,cursor:"pointer",fontWeight:sel?"bold":"normal"}}>{fx.name}</button>;
           })}
@@ -546,7 +549,7 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId }) {
+function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
@@ -554,8 +557,9 @@ function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory
   const handleSave = () => {
     const data = {
       type: "lumina-project",
-      version: 1,
+      version: 2,
       savedAt: new Date().toISOString(),
+      fixtures: fixtures,
       cues: cues,
       sequenceStorage: sequenceStorage,
     };
@@ -577,6 +581,7 @@ function SequenceStoragePanel({ sequenceStorage, setSequenceStorage, seqCategory
       try {
         const data = JSON.parse(ev.target.result);
         if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
+        if(data.fixtures) { setFixtures(data.fixtures); setDmxPatch(generateDefaultPatch(data.fixtures)); }
         if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
         if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
       } catch(err) { alert("Failed to load file: " + err.message); }
@@ -677,11 +682,11 @@ const defaultCues = [
   {id:genId(),fixtureId:6,param:"yellow",beat:4,duration:8,value:100,easing:"bounce",fadeIn:0.4,fadeOut:0,startValue:0,endValue:0},
 ];
 
-function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
+function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
   const [activeParam, setActiveParam] = useState("dimmer");
   const [mode, setMode] = useState(null);
   const [heldPads, setHeldPads] = useState(new Set());
-  const [padValues, setPadValues] = useState(() => { const m={}; FIXTURES.forEach(fx=>{m[fx.id]=100;}); return m; });
+  const [padValues, setPadValues] = useState(() => { const m={}; fixtures.forEach(fx=>{m[fx.id]=100;}); return m; });
   const [quantize, setQuantize] = useState(false);
   const param = getParam(activeParam);
   const pressStart = useRef({});
@@ -750,7 +755,7 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
       const evt = beatEventRef.current;
       if (evt && evt.time > lastBeatTimeRef.current) {
         lastBeatTimeRef.current = evt.time;
-        FIXTURES.forEach(fx => {
+        fixtures.forEach(fx => {
           if (heldPads.has(fx.id)) {
             const val = padValues[fx.id] ?? Math.round((param.min+param.max)/2);
             setCues(prev => [...prev, {id:genId(),fixtureId:fx.id,param:activeParam,beat:evt.beat,duration:0.5,value:val,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:param.min,endValue:param.min}]);
@@ -811,7 +816,7 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
 
   const WW=44, WH=88, GAP=22;
   const blackAfter = new Set([0,1,3,4,5]);
-  const totalW = FIXTURES.length*(WW+GAP)-GAP+10;
+  const totalW = fixtures.length*(WW+GAP)-GAP+10;
 
   return (
     <div style={{background:"#0b0d11",borderTop:"2px solid #252930",flexShrink:0}}>
@@ -841,7 +846,7 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
       </div>
       <div style={{padding:"16px 10px 8px",overflowX:"auto"}}>
         <div style={{position:"relative",width:totalW,height:WH+20}}>
-          {FIXTURES.map((fx,idx) => {
+          {fixtures.map((fx,idx) => {
             const isHeld=heldPads.has(fx.id);
             const dimVal=dimmerLive[fx.id]||0;
             const liveVal=paramLive[fx.id];
@@ -873,7 +878,7 @@ function FixturePadBar({ cues, setCues, playhead, playheadRef, beatEventRef, aud
               </div>
             );
           })}
-          {FIXTURES.map((fx,idx) => {
+          {fixtures.map((fx,idx) => {
             if (!blackAfter.has(idx)) return null;
             return <div key={`bk-${idx}`} style={{position:"absolute",left:idx*(WW+GAP)+WW-12,top:0,width:24,height:54,borderRadius:"2px 2px 5px 5px",background:"linear-gradient(180deg,#1a1a1a,#2e2e2e 60%,#1a1a1a)",border:"1px solid #000",boxShadow:"0 5px 0 #000",zIndex:3,pointerEvents:"none"}}/>;
           })}
@@ -1146,6 +1151,9 @@ function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, b
 }
 
 function LightingTimeline() {
+  const [fixtures, setFixtures] = useState(() => { try { return JSON.parse(localStorage.getItem("lumina-fixtures")) || defaultFixtures(); } catch(e) { return defaultFixtures(); } });
+  const [fixtureManagerOpen, setFixtureManagerOpen] = useState(false);
+  useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
   const setCues = useCallback((updater) => {
@@ -1268,7 +1276,7 @@ function LightingTimeline() {
 
   // Output engine state
   const [dmxPatch, setDmxPatch] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(); } catch(e) { return generateDefaultPatch(); }
+    try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(fixtures); } catch(e) { return generateDefaultPatch(fixtures); }
   });
   const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25 });
   const [outputConnected, setOutputConnected] = useState(false);
@@ -1399,7 +1407,7 @@ function LightingTimeline() {
 
   const rows=[];
   let yOff=0;
-  FIXTURES.forEach(fx=>{
+  fixtures.forEach(fx=>{
     rows.push({type:"fixture",fixtureId:fx.id,y:yOff,h:FIXTURE_HDR_H}); yOff+=FIXTURE_HDR_H;
     if(expandedFixtures.has(fx.id)){
       PARAM_GROUPS.forEach(group=>{
@@ -1415,9 +1423,9 @@ function LightingTimeline() {
   const toggleGroup=gk=>setExpandedGroups(prev=>{const s=new Set(prev);s.has(gk)?s.delete(gk):s.add(gk);return s;});
 
   const handleParamSelect = useCallback((paramId, groupName) => {
-    setExpandedFixtures(new Set(FIXTURES.map(fx => fx.id)));
-    setExpandedGroups(new Set(FIXTURES.map(fx => `${fx.id}-${groupName}`)));
-  }, []);
+    setExpandedFixtures(new Set(fixtures.map(fx => fx.id)));
+    setExpandedGroups(new Set(fixtures.map(fx => `${fx.id}-${groupName}`)));
+  }, [fixtures]);
 
   const handleGridMouseDown=e=>{
     if(e.target.dataset.cue) return;
@@ -1623,6 +1631,7 @@ function LightingTimeline() {
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCue(null);}else{setCopyMode(true);}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCue?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCue?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCue?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCue?"PASTE":"COPY"):"COPY"}</button>
         <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e222a",border:"1px solid "+(undoHistoryRef.current.length?"#e8aa2266":"#2e3340"),color:undoHistoryRef.current.length?"#e8aa22":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
+        <button onClick={()=>setFixtureManagerOpen(true)} style={{background:"#1e222a",border:"1px solid #2e3340",color:"#888",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}} title="Manage fixtures">{"\u2699"} FIX</button>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
           <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#e8aa22"}}/>
@@ -1675,7 +1684,7 @@ function LightingTimeline() {
 
             {rows.map((row,ri)=>{
               if(row.type==="fixture"){
-                const fx=FIXTURES.find(f=>f.id===row.fixtureId);
+                const fx=fixtures.find(f=>f.id===row.fixtureId);
                 const isExp=expandedFixtures.has(fx.id);
                 const hasActive=cues.some(c=>c.fixtureId===fx.id&&playhead>=c.beat&&playhead<c.beat+c.duration);
                 return(
@@ -1768,7 +1777,7 @@ function LightingTimeline() {
                 <div style={{padding:10,display:"flex",flexDirection:"column",gap:8}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <div style={{width:6,height:6,borderRadius:"50%",background:selParam.color}}/>
-                    <span style={{fontSize:10,color:selParam.color}}>{FIXTURES.find(f=>f.id===selCue.fixtureId)?.name}</span>
+                    <span style={{fontSize:10,color:selParam.color}}>{fixtures.find(f=>f.id===selCue.fixtureId)?.name}</span>
                     <span style={{fontSize:9,color:"#555"}}>/ {selParam.label}</span>
                   </div>
                   {[
@@ -1816,9 +1825,9 @@ function LightingTimeline() {
                 <div style={{padding:14,fontSize:9,color:"#252930",lineHeight:2}}>Click a cue to inspect.<br/>{"\u270E"} Draw on a param lane to create cues.</div>
               )
             ):rightTab==="fx"?(
-              <EffectGenerator setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
+              <EffectGenerator fixtures={fixtures} setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
@@ -1856,7 +1865,7 @@ function LightingTimeline() {
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX PATCH</div>
                 <button onClick={()=>setDmxPatchModalOpen(true)} style={{padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #ff884444",color:"#ff8844",borderRadius:4,cursor:"pointer",width:"100%"}}>OPEN PATCH</button>
                 <div style={{display:"flex",flexDirection:"column",gap:1,marginTop:4}}>
-                  {FIXTURES.map(fx => {
+                  {fixtures.map(fx => {
                     const p = dmxPatch[fx.id];
                     const prof = p ? DMX_PROFILES[p.profile] : null;
                     return (
@@ -1884,6 +1893,47 @@ function LightingTimeline() {
         </div>
       </div>
 
+      {/* Fixture Manager Modal */}
+      {fixtureManagerOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureManagerOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #44aaff44",borderRadius:8,width:560,maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#44aaff",letterSpacing:2}}>FIXTURES</span>
+              <span style={{marginLeft:8,fontSize:9,color:"#555"}}>COUNT</span>
+              <input type="number" min={1} max={64} value={fixtures.length} onChange={e=>{const n=Math.max(1,Math.min(64,+e.target.value));setFixtures(prev=>{if(n===prev.length)return prev;if(n<prev.length)return prev.slice(0,n);const added=[];const maxId=prev.reduce((m,f)=>Math.max(m,f.id),0);const types=Object.keys(DMX_PROFILES);for(let i=prev.length;i<n;i++){const t=types[i%types.length];added.push({id:maxId+1+(i-prev.length),name:`Fixture ${maxId+1+(i-prev.length)}`,color:TYPE_COLORS[t]||"#ff5544",type:t});}return[...prev,...added];});}} style={{width:42,marginLeft:4,background:"#080a0e",border:"1px solid #1e222a",color:"#44aaff",borderRadius:3,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
+              <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                <button onClick={()=>{setFixtures(defaultFixtures());setDmxPatch(generateDefaultPatch(defaultFixtures()));}} style={{padding:"4px 12px",fontSize:9,background:"#0c0e12",border:"1px solid #252930",color:"#777",borderRadius:3,cursor:"pointer",letterSpacing:1}}>RESET</button>
+                <button onClick={()=>setFixtureManagerOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+            <div style={{display:"flex",padding:"6px 16px",gap:4,borderBottom:"1px solid #1a1d22",fontSize:8,color:"#555",letterSpacing:1}}>
+              <span style={{width:28,textAlign:"center"}}>#</span>
+              <span style={{flex:1}}>NAME</span>
+              <span style={{width:100}}>TYPE</span>
+              <span style={{width:36,textAlign:"center"}}>COLOR</span>
+              <span style={{width:36}}/>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"4px 16px 12px"}}>
+              {fixtures.map((fx,idx) => (
+                <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderTop:idx>0?"1px solid #1a1d22":"none"}}>
+                  <span style={{width:28,textAlign:"center",fontSize:10,color:"#555"}}>{fx.id}</span>
+                  <input type="text" value={fx.name} onChange={e=>{const v=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,name:v}:f));}} style={{flex:1,background:"#080a0e",border:"1px solid #1e222a",color:"#ddd",borderRadius:2,padding:"3px 6px",fontSize:10}}/>
+                  <select value={fx.type} onChange={e=>{const t=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));}} style={{width:100,background:"#080a0e",border:"1px solid #1e222a",color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10}}>
+                    {Object.keys(DMX_PROFILES).map(t=><option key={t} value={t}>{t} ({DMX_PROFILES[t].channels}ch)</option>)}
+                  </select>
+                  <input type="color" value={fx.color} onChange={e=>{const c=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));}} style={{width:28,height:22,border:"1px solid #1e222a",borderRadius:2,background:"none",cursor:"pointer",padding:0}}/>
+                  <button onClick={()=>{setFixtures(prev=>prev.filter(f=>f.id!==fx.id));}} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
+              <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
+              <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DMX Patch Modal */}
       {dmxPatchModalOpen && (
         <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setDmxPatchModalOpen(false)}>
@@ -1891,7 +1941,7 @@ function LightingTimeline() {
             <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
               <span style={{fontSize:12,fontWeight:"bold",color:"#ff8844",letterSpacing:2}}>DMX PATCH</span>
               <div style={{marginLeft:"auto",display:"flex",gap:8}}>
-                <button onClick={()=>setDmxPatch(generateDefaultPatch())} style={{padding:"4px 12px",fontSize:9,background:"#0c0e12",border:"1px solid #252930",color:"#777",borderRadius:3,cursor:"pointer",letterSpacing:1}}>AUTO PATCH</button>
+                <button onClick={()=>setDmxPatch(generateDefaultPatch(fixtures))} style={{padding:"4px 12px",fontSize:9,background:"#0c0e12",border:"1px solid #252930",color:"#777",borderRadius:3,cursor:"pointer",letterSpacing:1}}>AUTO PATCH</button>
                 <button onClick={()=>setDmxPatchModalOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
               </div>
             </div>
@@ -1905,7 +1955,7 @@ function LightingTimeline() {
               <span style={{width:50,textAlign:"right"}}>LIVE</span>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"4px 16px 12px"}}>
-              {FIXTURES.map((fx,fxIdx) => {
+              {fixtures.map((fx,fxIdx) => {
                 const p = dmxPatch[fx.id] || {universe:1,address:1,profile:fx.type,overrides:{}};
                 const profile = DMX_PROFILES[p.profile] || DMX_PROFILES.SPOT;
                 const params = Object.entries(profile.map);
@@ -1942,10 +1992,10 @@ function LightingTimeline() {
         </div>
       )}
 
-      <FixturePadBar cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
+      <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
 
       <div style={{height:22,background:"#141820",borderTop:"1px solid #252930",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
-        {[{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"}].map(item=>(
+        {[{label:"FIX",val:fixtures.length},{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"}].map(item=>(
           <span key={item.label} style={{fontSize:8,color:"#444"}}>
             <span style={{color:"#252930",marginRight:4}}>{item.label}</span>
             <span style={{color:"#666"}}>{item.val}</span>
