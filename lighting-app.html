@@ -1636,6 +1636,13 @@ function LightingTimeline() {
           {String(Math.floor(playhead/4)+1).padStart(3,"0")} : {Math.floor(playhead%4)+1}
           <span style={{fontSize:8,color:"#333",marginLeft:4}}>BAR.BEAT</span>
         </div>
+        <div style={{display:"flex",alignItems:"center",gap:4,background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"2px 8px"}}>
+          <span style={{fontSize:7,color:"#44ffaa55",letterSpacing:1}}>IN</span>
+          <input type="number" value={loopStart} min={0} max={TOTAL_BEATS} onChange={e=>setLoopStart(Math.min(+e.target.value,loopEnd-1))} style={{width:36,background:"transparent",border:"none",color:"#44ffaa",fontSize:11,textAlign:"center",padding:0}}/>
+          <div style={{width:1,height:14,background:"#252930"}}/>
+          <span style={{fontSize:7,color:"#44ffaa55",letterSpacing:1}}>OUT</span>
+          <input type="number" value={loopEnd} min={0} max={TOTAL_BEATS} onChange={e=>setLoopEnd(Math.max(+e.target.value,loopStart+1))} style={{width:36,background:"transparent",border:"none",color:"#44ffaa",fontSize:11,textAlign:"center",padding:0}}/>
+        </div>
         <div style={{flex:1}}/>
         <button onClick={()=>setLoopEnabled(v=>!v)} style={{background:loopEnabled?"#162a1e":"#1e222a",border:"1px solid "+(loopEnabled?"#44ffaa66":"#2e3340"),color:loopEnabled?"#44ffaa":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u21BB"} LOOP</button>
         <button onClick={()=>setSnapToGrid(v=>!v)} style={{background:snapToGrid?"#162030":"#1e222a",border:"1px solid "+(snapToGrid?"#4488ff66":"#2e3340"),color:snapToGrid?"#4488ff":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u25A6"} SNAP</button>
@@ -1900,15 +1907,6 @@ function LightingTimeline() {
                 </div>
               </div>
             )}
-          </div>
-          <div style={{borderTop:"1px solid #252930",padding:"8px 12px"}}>
-            <div style={{fontSize:8,color:"#44ffaa66",letterSpacing:2,marginBottom:6}}>LOOP REGION</div>
-            {[{label:"IN",val:loopStart,set:v=>setLoopStart(Math.min(v,loopEnd-1))},{label:"OUT",val:loopEnd,set:v=>setLoopEnd(Math.max(v,loopStart+1))}].map(row=>(
-              <div key={row.label} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                <span style={{fontSize:9,color:"#44ffaa66",width:24}}>{row.label}</span>
-                <input type="number" value={row.val} min={0} max={TOTAL_BEATS} onChange={e=>row.set(+e.target.value)} style={{flex:1,background:"#0c0e12",border:"1px solid #252930",color:"#44ffaa",borderRadius:3,padding:"2px 6px",fontSize:11}}/>
-              </div>
-            ))}
           </div>
         </div>
       </div>
