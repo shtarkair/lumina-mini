@@ -1569,9 +1569,11 @@ function LightingTimeline() {
     window.addEventListener("mousemove",onMove); window.addEventListener("mouseup",onUp);
   };
 
-  const selCue=cues.find(c=>c.id===selectedCue);
+  const multiSel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):[];
+  const selCue=selectedCue?cues.find(c=>c.id===selectedCue):(multiSel.length>0?multiSel[0]:null);
   const selParam=selCue?getParam(selCue.param):null;
-  const updateCue=(key,val)=>setCues(prev=>prev.map(c=>c.id===selCue.id?{...c,[key]:val}:c));
+  const editIds=selectedCues.size>0?selectedCues:selCue?new Set([selCue.id]):new Set();
+  const updateCue=(key,val)=>setCues(prev=>prev.map(c=>editIds.has(c.id)?{...c,[key]:val}:c));
 
   return (
     <div style={{width:"100%",height:"100vh",background:"#141820",display:"flex",flexDirection:"column",fontFamily:"'Courier New',monospace",color:"#c0c6d0",overflow:"hidden",userSelect:"none"}}>
@@ -1785,8 +1787,8 @@ function LightingTimeline() {
                 <div style={{padding:10,display:"flex",flexDirection:"column",gap:8}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <div style={{width:6,height:6,borderRadius:"50%",background:selParam.color}}/>
-                    <span style={{fontSize:10,color:selParam.color}}>{fixtures.find(f=>f.id===selCue.fixtureId)?.name}</span>
-                    <span style={{fontSize:9,color:"#555"}}>/ {selParam.label}</span>
+                    <span style={{fontSize:10,color:selParam.color}}>{editIds.size>1?`${editIds.size} cues`:fixtures.find(f=>f.id===selCue.fixtureId)?.name}</span>
+                    <span style={{fontSize:9,color:"#555"}}>{editIds.size>1?"/ batch edit":`/ ${selParam.label}`}</span>
                   </div>
                   {[
                     {label:"BEAT",key:"beat",val:+selCue.beat.toFixed(2),min:0,max:TOTAL_BEATS,step:0.25},
@@ -1827,7 +1829,7 @@ function LightingTimeline() {
                       </svg>
                     </div>
                   </div>
-                  <button onClick={()=>{setCues(prev=>prev.filter(c=>c.id!==selCue.id));setSelectedCue(null);}} style={{marginTop:4,background:"#1c0f0f",border:"1px solid #ff333344",color:"#ff5533",borderRadius:3,padding:"5px",cursor:"pointer",fontSize:10,letterSpacing:1}}>{"\u2716"} DELETE CUE</button>
+                  <button onClick={()=>{setCues(prev=>prev.filter(c=>!editIds.has(c.id)));setSelectedCue(null);setSelectedCues(new Set());}} style={{marginTop:4,background:"#1c0f0f",border:"1px solid #ff333344",color:"#ff5533",borderRadius:3,padding:"5px",cursor:"pointer",fontSize:10,letterSpacing:1}}>{"\u2716"} DELETE {editIds.size>1?`${editIds.size} CUES`:"CUE"}</button>
                 </div>
               ):(
                 <div style={{padding:14,fontSize:9,color:"#252930",lineHeight:2}}>Click a cue to inspect.<br/>{"\u270E"} Draw on a param lane to create cues.</div>
