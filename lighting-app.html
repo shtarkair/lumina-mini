@@ -562,6 +562,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
       fixtures: fixtures,
       cues: cues,
       sequenceStorage: sequenceStorage,
+      mutedLanes: [...mutedLanes],
     };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -584,6 +585,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
         if(data.fixtures) { setFixtures(data.fixtures); setDmxPatch(generateDefaultPatch(data.fixtures)); }
         if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
         if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
+        if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
       } catch(err) { alert("Failed to load file: " + err.message); }
     };
     reader.readAsText(file);
@@ -1267,6 +1269,7 @@ function LightingTimeline() {
   const [fxEnd,setFxEnd] = useState(16);
   const [copyMode,setCopyMode] = useState(false);
   const [copiedCues,setCopiedCues] = useState(null);
+  const [mutedLanes,setMutedLanes] = useState(new Set());
   const [sequenceStorage,setSequenceStorage] = useState(()=>{const s={};PARAM_GROUPS.forEach(g=>{s[g.group]=new Array(100).fill(null);});return s;});
   const [seqCategory,setSeqCategory] = useState("INTENSITY");
   const [seqStoreMode,setSeqStoreMode] = useState(false);
@@ -1353,9 +1356,9 @@ function LightingTimeline() {
 
   const liveValues=useMemo(()=>{
     const map={};
-    cues.forEach(c=>{if(playhead>=c.beat&&playhead<c.beat+c.duration) map[`${c.fixtureId}-${c.param}`]=interpolateCue(c,playhead);});
+    cues.forEach(c=>{const k=`${c.fixtureId}-${c.param}`;if(!mutedLanes.has(k)&&playhead>=c.beat&&playhead<c.beat+c.duration) map[k]=interpolateCue(c,playhead);});
     return map;
-  },[cues,playhead]);
+  },[cues,playhead,mutedLanes]);
 
   // Output engine: send liveValues → WebSocket → bridge server → ArtNet/sACN
   const liveValuesRef = useRef({});
@@ -1730,19 +1733,23 @@ function LightingTimeline() {
               }
               if(row.type==="param"){
                 const param=row.param;
+                const laneKey=`${row.fixtureId}-${row.paramId}`;
+                const isMuted=mutedLanes.has(laneKey);
+                const toggleMute=()=>setMutedLanes(prev=>{const n=new Set(prev);if(n.has(laneKey))n.delete(laneKey);else n.add(laneKey);return n;});
                 const laneCues=cues.filter(c=>c.fixtureId===row.fixtureId&&c.param===row.paramId);
-                const liveVal=liveValues[`${row.fixtureId}-${row.paramId}`];
+                const liveVal=liveValues[laneKey];
                 return(
-                  <div key={`${row.fixtureId}-${row.paramId}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:ri%2===0?"#151a24":"#171c28",borderBottom:"1px solid #222838"}}>
+                  <div key={laneKey} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:isMuted?"#12141a":ri%2===0?"#151a24":"#171c28",borderBottom:"1px solid #222838"}}>
                     <div style={{width:LABEL_W,flexShrink:0,borderRight:"1px solid #1a1e26"}}/>
                     <div style={{width:PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #1e222a",display:"flex",alignItems:"center",padding:"0 5px",gap:4}}>
-                      <div style={{width:3,height:20,borderRadius:1,background:param.color,opacity:0.5,flexShrink:0}}/>
-                      <div style={{flex:1,minWidth:0}}>
+                      <div style={{width:3,height:20,borderRadius:1,background:param.color,opacity:isMuted?0.15:0.5,flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0,opacity:isMuted?0.35:1}}>
                         <div style={{fontSize:9,color:"#999",whiteSpace:"nowrap",overflow:"hidden"}}>{param.label}</div>
                         <div style={{fontSize:7,color:"#2e3340"}}>{param.min}-{param.max}{param.unit}</div>
                       </div>
-                      <div style={{fontSize:10,fontWeight:"bold",color:liveVal!==undefined?"#e8aa22":"#2a2e38",minWidth:30,textAlign:"right",flexShrink:0,transition:"color 0.1s"}}>
-                        {liveVal!==undefined?Math.round(liveVal):"\u2014"}
+                      <button onClick={toggleMute} style={{padding:"1px 4px",fontSize:8,fontWeight:"bold",background:isMuted?"#ff440033":"transparent",border:isMuted?"1px solid #ff440066":"1px solid #252930",color:isMuted?"#ff6633":"#333",borderRadius:2,cursor:"pointer",lineHeight:1.2,flexShrink:0,letterSpacing:0.5}}>M</button>
+                      <div style={{fontSize:10,fontWeight:"bold",color:isMuted?"#ff440066":liveVal!==undefined?"#e8aa22":"#2a2e38",minWidth:30,textAlign:"right",flexShrink:0,transition:"color 0.1s"}}>
+                        {isMuted?"M":liveVal!==undefined?Math.round(liveVal):"\u2014"}
                       </div>
                     </div>
                     <div style={{position:"relative",flex:1,height:"100%",overflow:"hidden"}}>
@@ -1751,13 +1758,14 @@ function LightingTimeline() {
                       ))}
                       {loopEnabled&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(loopStart),width:beatToX(loopEnd-loopStart),background:"rgba(68,255,170,0.03)",pointerEvents:"none"}}/>}
                       {rightTab==="fx"&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(fxStart),width:beatToX(fxEnd-fxStart),background:"rgba(187,68,255,0.03)",pointerEvents:"none"}}/>}
+                      {isMuted&&<div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(255,68,0,0.03) 8px,rgba(255,68,0,0.03) 16px)",pointerEvents:"none",zIndex:4}}/>}
                       {laneCues.map(cue=>{
-                        const isActive=playhead>=cue.beat&&playhead<cue.beat+cue.duration;
+                        const isActive=!isMuted&&playhead>=cue.beat&&playhead<cue.beat+cue.duration;
                         const isSel=selectedCue===cue.id||selectedCues.has(cue.id);
                         const cueW=Math.max(4,beatToX(cue.duration)-2);
                         const cueH=row.h-4;
                         return(
-                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,background:isSel?`linear-gradient(180deg,${param.color}55,${param.color}22)`:isActive?`linear-gradient(180deg,${param.color}33,${param.color}11)`:`linear-gradient(180deg,${param.color}22,${param.color}08)`,border:isSel?`1px solid ${param.color}`:`1px solid ${param.color}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${param.color}66`:isActive?`0 0 8px ${param.color}44`:"none",zIndex:isSel?3:1}}>
+                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,opacity:isMuted?0.2:1,background:isSel?`linear-gradient(180deg,${param.color}55,${param.color}22)`:isActive?`linear-gradient(180deg,${param.color}33,${param.color}11)`:`linear-gradient(180deg,${param.color}22,${param.color}08)`,border:isSel?`1px solid ${param.color}`:`1px solid ${param.color}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${param.color}66`:isActive?`0 0 8px ${param.color}44`:"none",zIndex:isSel?3:1}}>
                             <CurvePath cue={cue} w={cueW} h={cueH} color={param.color} isActive={isActive}/>
                             <div style={{position:"absolute",top:2,left:3,fontSize:7,color:param.color,opacity:isActive?0.9:0.5,pointerEvents:"none"}}>{EASINGS[cue.easing||"linear"].icon}</div>
                             <div style={{position:"absolute",bottom:2,left:3,fontSize:8,color:"#fff",opacity:0.8,pointerEvents:"none",whiteSpace:"nowrap"}}>{cue.value}{param.unit}</div>
