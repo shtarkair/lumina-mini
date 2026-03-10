@@ -1852,7 +1852,20 @@ function LightingTimeline() {
                 <div style={{padding:14,fontSize:9,color:"#252930",lineHeight:2}}>Click a cue to inspect.<br/>{"\u270E"} Draw on a param lane to create cues.</div>
               )
             ):rightTab==="fx"?(
-              <EffectGenerator fixtures={fixtures} setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
+              <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+                <div style={{padding:"8px 10px",borderBottom:"1px solid #252930",display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:4,flex:1,background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"4px 8px"}}>
+                    <span style={{fontSize:7,color:"#bb44ff88",letterSpacing:1}}>IN</span>
+                    <input type="number" value={fxStart} min={0} max={TOTAL_BEATS} onChange={e=>setFxStart(Math.min(+e.target.value,fxEnd-1))} style={{width:36,background:"transparent",border:"none",color:"#bb44ff",fontSize:11,textAlign:"center",padding:0}}/>
+                    <div style={{width:1,height:14,background:"#252930"}}/>
+                    <span style={{fontSize:7,color:"#bb44ff88",letterSpacing:1}}>OUT</span>
+                    <input type="number" value={fxEnd} min={0} max={TOTAL_BEATS} onChange={e=>setFxEnd(Math.max(+e.target.value,fxStart+1))} style={{width:36,background:"transparent",border:"none",color:"#bb44ff",fontSize:11,textAlign:"center",padding:0}}/>
+                  </div>
+                </div>
+                <div style={{flex:1,overflow:"auto"}}>
+                  <EffectGenerator fixtures={fixtures} setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
+                </div>
+              </div>
             ):rightTab==="seq"?(
               <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
             ):(
