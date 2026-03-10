@@ -1356,7 +1356,7 @@ function LightingTimeline() {
 
   const liveValues=useMemo(()=>{
     const map={};
-    cues.forEach(c=>{const k=`${c.fixtureId}-${c.param}`;if(!mutedLanes.has(k)&&playhead>=c.beat&&playhead<c.beat+c.duration) map[k]=interpolateCue(c,playhead);});
+    cues.forEach(c=>{const k=`${c.fixtureId}-${c.param}`;if(!c.muted&&!mutedLanes.has(k)&&playhead>=c.beat&&playhead<c.beat+c.duration) map[k]=interpolateCue(c,playhead);});
     return map;
   },[cues,playhead,mutedLanes]);
 
@@ -1760,15 +1760,17 @@ function LightingTimeline() {
                       {rightTab==="fx"&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(fxStart),width:beatToX(fxEnd-fxStart),background:"rgba(187,68,255,0.03)",pointerEvents:"none"}}/>}
                       {isMuted&&<div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(255,68,0,0.03) 8px,rgba(255,68,0,0.03) 16px)",pointerEvents:"none",zIndex:4}}/>}
                       {laneCues.map(cue=>{
-                        const isActive=!isMuted&&playhead>=cue.beat&&playhead<cue.beat+cue.duration;
+                        const isCueMuted=cue.muted===true;
+                        const isActive=!isMuted&&!isCueMuted&&playhead>=cue.beat&&playhead<cue.beat+cue.duration;
                         const isSel=selectedCue===cue.id||selectedCues.has(cue.id);
                         const cueW=Math.max(4,beatToX(cue.duration)-2);
                         const cueH=row.h-4;
+                        const cc=isCueMuted?"#ff4444":param.color;
                         return(
-                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,opacity:isMuted?0.2:1,background:isSel?`linear-gradient(180deg,${param.color}55,${param.color}22)`:isActive?`linear-gradient(180deg,${param.color}33,${param.color}11)`:`linear-gradient(180deg,${param.color}22,${param.color}08)`,border:isSel?`1px solid ${param.color}`:`1px solid ${param.color}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${param.color}66`:isActive?`0 0 8px ${param.color}44`:"none",zIndex:isSel?3:1}}>
-                            <CurvePath cue={cue} w={cueW} h={cueH} color={param.color} isActive={isActive}/>
-                            <div style={{position:"absolute",top:2,left:3,fontSize:7,color:param.color,opacity:isActive?0.9:0.5,pointerEvents:"none"}}>{EASINGS[cue.easing||"linear"].icon}</div>
-                            <div style={{position:"absolute",bottom:2,left:3,fontSize:8,color:"#fff",opacity:0.8,pointerEvents:"none",whiteSpace:"nowrap"}}>{cue.value}{param.unit}</div>
+                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,opacity:isMuted?0.2:isCueMuted?0.55:1,background:isSel?`linear-gradient(180deg,${cc}55,${cc}22)`:isActive?`linear-gradient(180deg,${cc}33,${cc}11)`:`linear-gradient(180deg,${cc}22,${cc}08)`,border:isSel?`1px solid ${cc}`:`1px solid ${cc}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${cc}66`:isActive?`0 0 8px ${cc}44`:"none",zIndex:isSel?3:1}}>
+                            <CurvePath cue={cue} w={cueW} h={cueH} color={cc} isActive={isActive}/>
+                            <div style={{position:"absolute",top:2,left:3,fontSize:7,color:cc,opacity:isActive?0.9:0.5,pointerEvents:"none"}}>{isCueMuted?"\uD83D\uDD07":EASINGS[cue.easing||"linear"].icon}</div>
+                            <div style={{position:"absolute",bottom:2,left:3,fontSize:8,color:"#fff",opacity:isCueMuted?0.4:0.8,pointerEvents:"none",whiteSpace:"nowrap"}}>{cue.value}{param.unit}</div>
                             <div data-resize="true" style={{position:"absolute",right:0,top:0,width:5,height:"100%",cursor:"ew-resize",background:"rgba(255,255,255,0.05)"}}/>
                           </div>
                         );
@@ -1837,6 +1839,7 @@ function LightingTimeline() {
                       </svg>
                     </div>
                   </div>
+                  {(()=>{const anyMuted=cues.filter(c=>editIds.has(c.id)).some(c=>c.muted);return <button onClick={()=>updateCue("muted",!anyMuted)} style={{marginTop:4,background:anyMuted?"#1a0800":"#1a0f00",border:anyMuted?"1px solid #ff664466":"1px solid #ff993344",color:anyMuted?"#ff6633":"#ff9933",borderRadius:3,padding:"5px",cursor:"pointer",fontSize:10,letterSpacing:1}}>{anyMuted?"\uD83D\uDD0A":"\uD83D\uDD07"} {anyMuted?"UNMUTE":"MUTE"} {editIds.size>1?`${editIds.size} CUES`:"CUE"}</button>;})()}
                   <button onClick={()=>{setCues(prev=>prev.filter(c=>!editIds.has(c.id)));setSelectedCue(null);setSelectedCues(new Set());}} style={{marginTop:4,background:"#1c0f0f",border:"1px solid #ff333344",color:"#ff5533",borderRadius:3,padding:"5px",cursor:"pointer",fontSize:10,letterSpacing:1}}>{"\u2716"} DELETE {editIds.size>1?`${editIds.size} CUES`:"CUE"}</button>
                 </div>
               ):(
