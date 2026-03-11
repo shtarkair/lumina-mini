@@ -440,9 +440,13 @@ function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd
     <div style={{padding:8,display:"flex",flexDirection:"column",gap:8,fontSize:9}}>
       <div>
         <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>FIXTURES</div>
-        <div style={{display:"flex",gap:2,marginBottom:4}}>
+        <div style={{display:"flex",gap:2,marginBottom:4,flexWrap:"wrap"}}>
           <button onClick={selAll} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>ALL</button>
           <button onClick={selNone} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>NONE</button>
+          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
+          {Object.keys(DMX_PROFILES).map(t=>{const ids=fixtures.filter(f=>f.type===t).map(f=>f.id);if(ids.length===0)return null;const allSel=ids.every(id=>selFixtures.has(id));return <button key={t} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 6px",fontSize:8,background:allSel?"#e8aa2218":"#0c0e12",border:`1px solid ${allSel?"#e8aa22":"#252930"}`,color:allSel?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{t}</button>;})}
+          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
+          {[...new Set(fixtures.map(f=>f.color))].map(col=>{const ids=fixtures.filter(f=>f.color===col).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={col} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 4px",fontSize:8,background:allSel?col+"33":"#0c0e12",border:`1px solid ${allSel?col:"#252930"}`,borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><div style={{width:8,height:8,borderRadius:"50%",background:col}}/></button>;})}
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
           {fixtures.map(fx => {
@@ -1692,7 +1696,6 @@ function LightingTimeline() {
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCues(null);}else{setCopyMode(true);const sel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):selectedCue?cues.filter(c=>c.id===selectedCue):[];if(sel.length>0){setCopiedCues(sel.map(c=>({...c,id:null})));}}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCues?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCues?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCues?`PASTE (${copiedCues.length})`:"COPY"):"COPY"}</button>
         <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e222a",border:"1px solid "+(undoHistoryRef.current.length?"#e8aa2266":"#2e3340"),color:undoHistoryRef.current.length?"#e8aa22":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
-        <button onClick={()=>setFixtureManagerOpen(true)} style={{background:"#1e222a",border:"1px solid #2e3340",color:"#888",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}} title="Manage fixtures">{"\u2699"} FIX</button>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
           <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#e8aa22"}}/>
@@ -1942,8 +1945,11 @@ function LightingTimeline() {
                   <span style={{fontSize:9,color:"#ff8844",width:40,textAlign:"right"}}>{Math.round(1000/outputConfig.dmxRate)}Hz</span>
                 </div>
 
-                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX PATCH</div>
-                <button onClick={()=>setDmxPatchModalOpen(true)} style={{padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #ff884444",color:"#ff8844",borderRadius:4,cursor:"pointer",width:"100%"}}>OPEN PATCH</button>
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>FIXTURES & PATCH</div>
+                <div style={{display:"flex",gap:4}}>
+                  <button onClick={()=>setFixtureManagerOpen(true)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #44aaff44",color:"#44aaff",borderRadius:4,cursor:"pointer"}}>{"\u2699"} FIXTURES</button>
+                  <button onClick={()=>setDmxPatchModalOpen(true)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #ff884444",color:"#ff8844",borderRadius:4,cursor:"pointer"}}>OPEN PATCH</button>
+                </div>
                 <div style={{display:"flex",flexDirection:"column",gap:1,marginTop:4}}>
                   {fixtures.map(fx => {
                     const p = dmxPatch[fx.id];
