@@ -2042,8 +2042,8 @@ function LightingTimeline() {
                 });
                 setKeypadState(null);
               };
-              const kpPress = (d) => setKeypadState(prev => ({...prev, value: prev.value === '0' ? String(d) : prev.value + d}));
-              const kpClear = () => setKeypadState(prev => ({...prev, value: ''}));
+              const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+              const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
               const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
               return (
                 <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
@@ -2052,7 +2052,7 @@ function LightingTimeline() {
                       <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>{label}</span>
                       <span style={{fontSize:8,color:"#555"}}>1–{max}</span>
                     </div>
-                    <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:"#ff8844",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
+                    <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:keypadState.dirty?"#ff8844":"#ff884466",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
                       {[1,2,3,4,5,6,7,8,9].map(d => (
                         <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
@@ -2061,7 +2061,7 @@ function LightingTimeline() {
                       <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
                       <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
                     </div>
-                    <button onClick={()=>applyValue(keypadState.value)} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2,marginTop:2}}>ENTER</button>
+                    <button onClick={()=>{if(keypadState.dirty){applyValue(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2,marginTop:2}}>ENTER</button>
                   </div>
                 </div>
               );
