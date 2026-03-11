@@ -552,7 +552,7 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId }) {
+function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
@@ -609,7 +609,18 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
     } else {
       if(!slots[i]) return;
       const bid = genId();
-      const recalled = slots[i].cues.map(c=>({...c,id:genId(),batchId:bid}));
+      const fade = seqFadeBeats;
+      const recalled = slots[i].cues.map(c=>{
+        const newCue = {...c, id:genId(), batchId:bid};
+        if(fade > 0 && newCue.duration > 0) {
+          const liveKey = `${newCue.fixtureId}-${newCue.param}`;
+          const currentVal = liveValues[liveKey];
+          const fadeFrac = Math.min(1, fade / newCue.duration);
+          newCue.fadeIn = fadeFrac;
+          if(currentVal !== undefined) newCue.startValue = currentVal;
+        }
+        return newCue;
+      });
       if(seqRecallMode==="replace") setCues(recalled);
       else setCues(prev=>[...prev,...recalled]);
       setLastRecalledBatchId(bid);
@@ -624,6 +635,11 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
         <button onClick={()=>{setSeqStoreMode(!seqStoreMode);setSeqClearMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqStoreMode?"#2a1a00":"#0c0e12",border:seqStoreMode?"1px solid #e8aa22":"1px solid #252930",color:seqStoreMode?"#e8aa22":"#555",borderRadius:3,cursor:"pointer",animation:seqStoreMode?"seqstore 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>● STORE</button>
         <button onClick={()=>{setSeqClearMode(!seqClearMode);setSeqStoreMode(false);}} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:seqClearMode?"#1c0f0f":"#0c0e12",border:seqClearMode?"1px solid #ff5544":"1px solid #252930",color:seqClearMode?"#ff5544":"#555",borderRadius:3,cursor:"pointer",animation:seqClearMode?"seqclear 1.5s ease-in-out infinite":"none",fontWeight:"bold"}}>✖ CLEAR</button>
         <button onClick={()=>setSeqRecallMode(seqRecallMode==="merge"?"replace":"merge")} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0c0e12",border:"1px solid #252930",color:seqRecallMode==="merge"?"#44aaff":"#ff8844",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>{seqRecallMode==="merge"?"MERGE":"REPLACE"}</button>
+      </div>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <span style={{fontSize:8,color:"#555",letterSpacing:1,whiteSpace:"nowrap"}}>FADE</span>
+        <input type="range" min={0} max={16} step={0.25} value={seqFadeBeats} onChange={e=>setSeqFadeBeats(+e.target.value)} style={{flex:1,accentColor:seqFadeBeats>0?"#e8aa22":"#333"}}/>
+        <span style={{fontSize:9,color:seqFadeBeats>0?"#e8aa22":"#555",fontFamily:"monospace",width:40,textAlign:"right"}}>{seqFadeBeats>0?seqFadeBeats+"b":"OFF"}</span>
       </div>
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
         <button onClick={handleSave} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE</button>
@@ -1278,6 +1294,7 @@ function LightingTimeline() {
   const [seqStoreMode,setSeqStoreMode] = useState(false);
   const [seqClearMode,setSeqClearMode] = useState(false);
   const [seqRecallMode,setSeqRecallMode] = useState("merge");
+  const [seqFadeBeats,setSeqFadeBeats] = useState(0);
   const [lastRecalledBatchId,setLastRecalledBatchId] = useState(null);
 
   // Output engine state
@@ -1874,7 +1891,7 @@ function LightingTimeline() {
                 </div>
               </div>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={playhead}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
