@@ -70,7 +70,7 @@ const PARAM_GROUPS = [
 const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
-const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa" };
+const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc" };
 function defaultFixtures() {
   return [
     { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
@@ -91,6 +91,7 @@ const DMX_PROFILES = {
   STROBE: { channels:3, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8}, colorwheel:{offset:2,bits:8} }},
   LED: { channels:8, map:{ dimmer:{offset:0,bits:8}, cyan:{offset:1,bits:8}, magenta:{offset:2,bits:8}, yellow:{offset:3,bits:8}, white:{offset:4,bits:8}, strobe:{offset:5,bits:8}, zoom:{offset:6,bits:8}, colorwheel:{offset:7,bits:8} }},
   FX: { channels:2, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8} }},
+  DIM: { channels:1, map:{ dimmer:{offset:0,bits:8} }},
 };
 
 function generateDefaultPatch(fixtures) {
@@ -1313,7 +1314,7 @@ function LightingTimeline() {
   const [seqCategory,setSeqCategory] = useState("INTENSITY");
   const [seqStoreMode,setSeqStoreMode] = useState(false);
   const [seqClearMode,setSeqClearMode] = useState(false);
-  const [seqRecallMode,setSeqRecallMode] = useState("merge");
+  const [seqRecallMode,setSeqRecallMode] = useState("replace");
   const [seqFadeBeats,setSeqFadeBeats] = useState(0);
   const [lastRecalledBatchId,setLastRecalledBatchId] = useState(null);
 
@@ -1839,7 +1840,7 @@ function LightingTimeline() {
         <div style={{width:rightPanelWide?440:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
           <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
             {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"},{id:"out",label:"OUT"}].map(tab=>(
-              <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1c2030":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #e8aa22":"2px solid transparent",color:rightTab===tab.id?"#e8aa22":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
+              <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1a2a1a":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #44cc44":"2px solid transparent",color:rightTab===tab.id?"#44cc44":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
             ))}
           </div>
           <div style={{flex:1,overflowY:"auto"}}>
