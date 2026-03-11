@@ -146,5 +146,6 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`LUMINA FX server at http://localhost:${PORT}`);
   console.log(`WebSocket bridge active on ws://localhost:${PORT}`);
+  console.log(`DMX output: 64 universes × 512 channels (32,768 ch)`);
   console.log(`ArtNet output → UDP ${ARTNET_PORT} | sACN output → UDP ${SACN_PORT}`);
 });

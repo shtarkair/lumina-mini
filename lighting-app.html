@@ -95,14 +95,17 @@ const DMX_PROFILES = {
 
 function generateDefaultPatch(fixtures) {
   const patch = {};
-  let addr = 1;
+  let uni = 1, addr = 1;
   fixtures.forEach(fx => {
     const profile = DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT;
+    // Advance to next universe if fixture won't fit in current one
+    if (addr + profile.channels - 1 > 512) { uni++; addr = 1; }
+    if (uni > 64) return; // Max 64 universes
     const overrides = {};
     Object.entries(profile.map).forEach(([paramId, {offset, bits}]) => {
-      overrides[paramId] = { universe:1, channel: addr + offset, bits };
+      overrides[paramId] = { universe:uni, channel: addr + offset, bits };
     });
-    patch[fx.id] = { universe:1, address:addr, profile:fx.type, overrides };
+    patch[fx.id] = { universe:uni, address:addr, profile:fx.type, overrides };
     addr += profile.channels;
   });
   return patch;
@@ -1285,6 +1288,7 @@ function LightingTimeline() {
   const [outputConnected, setOutputConnected] = useState(false);
   const dmxPatchRef = useRef(dmxPatch);
   const [dmxPatchModalOpen, setDmxPatchModalOpen] = useState(false);
+  const [keypadState, setKeypadState] = useState(null); // { fxId, paramId, field:'universe'|'channel', value:'', rect:{top,left} }
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
 
   const shiftTimerRef = useRef(null);
@@ -2013,8 +2017,8 @@ function LightingTimeline() {
                         </div>
                       ) : <div style={{width:80}}/>}
                       <span style={{width:80,fontSize:9,color:bypassed?"#333":(paramDef?.color||"#888"),textDecoration:bypassed?"line-through":"none"}}>{paramDef?.label||paramId}</span>
-                      <input type="number" min={1} max={32768} value={ov.universe} disabled={bypassed} onChange={e=>{const v=Math.max(1,+e.target.value);setDmxPatch(prev=>{const fp={...prev[fx.id]};const ovs={...(fp.overrides||{})};ovs[paramId]={...ov,universe:v};return{...prev,[fx.id]:{...fp,overrides:ovs}};});}} style={{width:36,background:"#080a0e",border:"1px solid "+(bypassed?"#111":"#1e222a"),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center"}}/>
-                      <input type="number" min={1} max={512} value={ov.channel} disabled={bypassed} onChange={e=>{const v=Math.max(1,Math.min(512,+e.target.value));setDmxPatch(prev=>{const fp={...prev[fx.id]};const ovs={...(fp.overrides||{})};ovs[paramId]={...ov,channel:v};return{...prev,[fx.id]:{...fp,overrides:ovs}};});}} style={{width:44,background:"#080a0e",border:"1px solid "+(bypassed?"#111":"#1e222a"),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center"}}/>
+                      <div onClick={e=>{if(bypassed)return;const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId,field:'universe',value:String(ov.universe),rect:{top:r.bottom+2,left:r.left}});}} style={{width:36,background:"#080a0e",border:"1px solid "+(bypassed?"#111":(keypadState?.fxId===fx.id&&keypadState?.paramId===paramId&&keypadState?.field==='universe'?"#ff8844":"#1e222a")),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center",cursor:bypassed?"default":"pointer",userSelect:"none"}}>{ov.universe}</div>
+                      <div onClick={e=>{if(bypassed)return;const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId,field:'channel',value:String(ov.channel),rect:{top:r.bottom+2,left:r.left}});}} style={{width:44,background:"#080a0e",border:"1px solid "+(bypassed?"#111":(keypadState?.fxId===fx.id&&keypadState?.paramId===paramId&&keypadState?.field==='channel'?"#ff8844":"#1e222a")),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center",cursor:bypassed?"default":"pointer",userSelect:"none"}}>{ov.channel}</div>
                       <span style={{width:28,textAlign:"center",fontSize:8,color:bypassed?"#222":(ov.bits===16?"#4488ff":"#555")}}>{ov.bits}b</span>
                       <span style={{width:50,textAlign:"right",fontSize:9,color:bypassed?"#222":(liveVal!==undefined?"#22cc55":"#333"),fontFamily:"monospace"}}>{bypassed?"OFF":(liveVal!==undefined?`${Math.round(liveVal)}${paramDef?.unit||""}`:"—")}</span>
                     </div>
@@ -2022,6 +2026,46 @@ function LightingTimeline() {
                 });
               })}
             </div>
+            {/* Numeric Keypad Popup */}
+            {keypadState && (() => {
+              const isUni = keypadState.field === 'universe';
+              const max = isUni ? 64 : 512;
+              const label = isUni ? 'UNIVERSE' : 'CHANNEL';
+              const applyValue = (val) => {
+                const v = Math.max(1, Math.min(max, parseInt(val) || 1));
+                setDmxPatch(prev => {
+                  const fp = {...prev[keypadState.fxId]};
+                  const ovs = {...(fp.overrides || {})};
+                  const existing = ovs[keypadState.paramId] || {};
+                  ovs[keypadState.paramId] = {...existing, [isUni ? 'universe' : 'channel']: v};
+                  return {...prev, [keypadState.fxId]: {...fp, overrides: ovs}};
+                });
+                setKeypadState(null);
+              };
+              const kpPress = (d) => setKeypadState(prev => ({...prev, value: prev.value === '0' ? String(d) : prev.value + d}));
+              const kpClear = () => setKeypadState(prev => ({...prev, value: ''}));
+              const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
+              return (
+                <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
+                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-220),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                      <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>{label}</span>
+                      <span style={{fontSize:8,color:"#555"}}>1–{max}</span>
+                    </div>
+                    <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:"#ff8844",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+                      {[1,2,3,4,5,6,7,8,9].map(d => (
+                        <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                      ))}
+                      <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                      <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                      <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+                    </div>
+                    <button onClick={()=>applyValue(keypadState.value)} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2,marginTop:2}}>ENTER</button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
