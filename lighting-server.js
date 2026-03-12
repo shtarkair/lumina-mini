@@ -266,8 +266,12 @@ function broadcastToClients(msg) {
 }
 
 // --- Merge & Output Loop ---
+function isValidIP(ip) {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip);
+}
+
 function sendUniverse(universe, data) {
-  if (clientConfig.artnet) {
+  if (clientConfig.artnet && isValidIP(clientConfig.artnetHost)) {
     const packet = buildArtNetPacket(universe, data);
     artnetSocket.send(packet, 0, packet.length, ARTNET_PORT, clientConfig.artnetHost);
   }
