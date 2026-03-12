@@ -1367,6 +1367,8 @@ function LightingTimeline() {
   const [monitorUniverse, setMonitorUniverse] = useState(1);
   const monitorDataRef = useRef({});
   const [monitorTick, setMonitorTick] = useState(0);
+  const [nicList, setNicList] = useState([]);
+  const [nicConfig, setNicConfig] = useState({ inputIP: '0.0.0.0', outputIP: '0.0.0.0' });
   const [keypadState, setKeypadState] = useState(null); // { fxId, paramId, field:'universe'|'channel', value:'', rect:{top,left} }
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
 
@@ -1471,6 +1473,10 @@ function LightingTimeline() {
             }
             if (msg.type === 'dmx_monitor' && msg.universes) {
               monitorDataRef.current = msg.universes;
+            }
+            if (msg.type === 'nic_list') {
+              setNicList(msg.interfaces || []);
+              if (msg.current) setNicConfig(msg.current);
             }
           } catch(e) {}
         };
@@ -2041,6 +2047,28 @@ function LightingTimeline() {
                     <span style={{fontSize:10,color:outputConfig.inputMonitor?"#4488ff":"#555"}}>Monitor Input</span>
                   </label>
                 </>}
+
+                <div style={{fontSize:8,color:"#aa66dd66",letterSpacing:2,marginTop:4}}>NETWORK INTERFACES</div>
+                {nicList.length>0?(
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:8,color:"#aa66dd",width:28}}>IN:</span>
+                      <select value={nicConfig.inputIP} onChange={e=>{const ip=e.target.value;setNicConfig(c=>({...c,inputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",inputIP:ip}));}} style={{flex:1,background:"#0c0e12",border:"1px solid #3a2a44",color:"#aa66dd",borderRadius:3,padding:"2px 4px",fontSize:9}}>
+                        <option value="0.0.0.0">Any (all interfaces)</option>
+                        {nicList.map(n=><option key={"in-"+n.ip} value={n.ip}>{n.name} — {n.ip}</option>)}
+                      </select>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:8,color:"#aa66dd",width:28}}>OUT:</span>
+                      <select value={nicConfig.outputIP} onChange={e=>{const ip=e.target.value;setNicConfig(c=>({...c,outputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",outputIP:ip}));}} style={{flex:1,background:"#0c0e12",border:"1px solid #3a2a44",color:"#aa66dd",borderRadius:3,padding:"2px 4px",fontSize:9}}>
+                        <option value="0.0.0.0">Default (all interfaces)</option>
+                        {nicList.map(n=><option key={"out-"+n.ip} value={n.ip}>{n.name} — {n.ip} → {n.broadcast}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ):(
+                  <div style={{fontSize:8,color:"#555"}}>No network interfaces detected</div>
+                )}
 
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX RATE</div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>

@@ -31,11 +31,54 @@ for (let u = 0; u <= MAX_UNIVERSES; u++) {
 }
 const activeUniverses = new Set();
 
+// --- Per-Universe State (for smart output scheduling) ---
+const universeState = [];
+for (let u = 0; u <= MAX_UNIVERSES; u++) {
+  universeState[u] = {
+    lastChanged: 0,   // Date.now() when data last changed
+    lastSent: 0,      // Date.now() when last packet was sent
+    idle: false,       // true = heartbeat mode (1Hz)
+    dirty: false       // true = data changed since last send, needs immediate burst
+  };
+}
+const IDLE_THRESHOLD = 1000;   // ms with no change before entering heartbeat mode
+const HEARTBEAT_INTERVAL = 1000; // 1Hz heartbeat for idle universes
+
 // --- Input Configuration ---
 let inputConfig = {
   enabled: false,
   sourceIP: null,        // null = accept from any, or specific IP string
   forwardToClient: false // send dmx_input to client for monitoring
+};
+
+// --- Network Interface Discovery ---
+function getNetworkInterfaces() {
+  const ifaces = os.networkInterfaces();
+  const result = [];
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    for (const addr of addrs) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        result.push({
+          name,
+          ip: addr.address,
+          netmask: addr.netmask,
+          mac: addr.mac,
+          // Calculate broadcast address from IP + netmask
+          broadcast: addr.address.split('.').map((octet, i) =>
+            (parseInt(octet) | (~parseInt(addr.netmask.split('.')[i]) & 255)).toString()
+          ).join('.')
+        });
+      }
+    }
+  }
+  return result;
+}
+
+// --- Network binding config ---
+let networkConfig = {
+  inputIP: '0.0.0.0',    // NIC IP to receive ArtNet on (0.0.0.0 = all)
+  outputIP: '0.0.0.0',   // NIC IP to send ArtNet from (0.0.0.0 = default)
+  outputBroadcast: '255.255.255.255' // broadcast address for output NIC
 };
 
 // --- Per-client protocol config ---
@@ -65,17 +108,29 @@ const server = http.createServer((req, res) => {
 });
 
 // --- UDP Output Sockets ---
-const artnetSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+let artnetSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 let outputSocketPort = null;
 artnetSocket.bind(() => {
   artnetSocket.setBroadcast(true);
   outputSocketPort = artnetSocket.address().port;
 });
 
-const sacnSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+let sacnSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 sacnSocket.bind(() => {
   try { sacnSocket.setBroadcast(true); } catch(e) {}
 });
+
+// Rebind output socket to a specific NIC IP
+function rebindOutputSocket(ip) {
+  try { artnetSocket.close(); } catch(e) {}
+  artnetSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  const bindAddr = (ip && ip !== '0.0.0.0') ? ip : undefined;
+  artnetSocket.bind({ address: bindAddr }, () => {
+    artnetSocket.setBroadcast(true);
+    outputSocketPort = artnetSocket.address().port;
+    console.log(`[OUTPUT SOCKET] Bound to ${artnetSocket.address().address}:${outputSocketPort}`);
+  });
+}
 
 // --- ArtNet Packet Builder ---
 let artnetSequence = 0;
@@ -143,14 +198,14 @@ function parseArtNetDMX(buf) {
 }
 
 // --- ArtNet Input Socket ---
-const artnetInputSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+let artnetInputSocket = null;
 let inputSocketBound = false;
 
 // Throttle forwarding to client (max 10Hz per universe)
 const forwardTimers = {};
 const FORWARD_INTERVAL = 100;
 
-artnetInputSocket.on('message', (buf, rinfo) => {
+function onArtNetInput(buf, rinfo) {
   if (!inputConfig.enabled) return;
 
   // Feedback loop prevention: ignore our own packets
@@ -167,6 +222,7 @@ artnetInputSocket.on('message', (buf, rinfo) => {
   // Copy into input buffer
   inputBuffer[universe].set(dmxData.slice(0, Math.min(dmxLength, 512)));
   activeUniverses.add(universe);
+  markUniverseDirty(universe);
 
   // Throttled forwarding to client for monitoring
   if (inputConfig.forwardToClient && !forwardTimers[universe]) {
@@ -178,18 +234,28 @@ artnetInputSocket.on('message', (buf, rinfo) => {
       data: Array.from(inputBuffer[universe])
     });
   }
-});
-
-artnetInputSocket.on('error', (err) => {
-  console.error('[ArtNet INPUT] Socket error:', err.message);
-});
+}
 
 function startInputSocket() {
   if (inputSocketBound) return;
-  artnetInputSocket.bind(ARTNET_PORT, '0.0.0.0', () => {
+  artnetInputSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  artnetInputSocket.on('message', onArtNetInput);
+  artnetInputSocket.on('error', (err) => console.error('[ArtNet INPUT] Socket error:', err.message));
+  const bindAddr = networkConfig.inputIP || '0.0.0.0';
+  artnetInputSocket.bind(ARTNET_PORT, bindAddr, () => {
     inputSocketBound = true;
-    console.log(`[ArtNet INPUT] Listening on UDP ${ARTNET_PORT}`);
+    console.log(`[ArtNet INPUT] Listening on ${bindAddr}:${ARTNET_PORT}`);
   });
+}
+
+// Rebind input socket to a specific NIC IP
+function rebindInputSocket(ip) {
+  if (artnetInputSocket) {
+    try { artnetInputSocket.close(); } catch(e) {}
+    artnetInputSocket = null;
+  }
+  inputSocketBound = false;
+  if (inputConfig.enabled) startInputSocket();
 }
 
 function broadcastToClients(msg) {
@@ -212,39 +278,105 @@ function sendUniverse(universe, data) {
   }
 }
 
-function mergeAndSend() {
+// --- Smart Output Scheduler ---
+// Runs at 1ms resolution. Each tick, checks which universes need sending:
+// - Active (dirty or within outputRate): send at configured rate, staggered
+// - Idle (no change for 1s, all zeros): send at 1Hz heartbeat
+// - Dirty: send immediately on next tick (wake-up)
+
+function mergeUniverse(universe) {
+  const inp = inputBuffer[universe];
+  const overrides = clientOverrides[universe];
+  const out = outputBuffer[universe];
+
+  if (inputConfig.enabled) {
+    // Input mode: start with console input, overlay Lumina overrides
+    out.set(inp);
+    if (overrides) {
+      for (const chStr in overrides) {
+        const ch = parseInt(chStr);
+        if (ch >= 0 && ch < 512) {
+          out[ch] = overrides[chStr];
+        }
+      }
+    }
+  }
+  // Legacy mode: outputBuffer already populated by dmx_frame handler
+}
+
+function isUniverseZero(universe) {
+  const out = outputBuffer[universe];
+  for (let i = 0; i < 512; i++) {
+    if (out[i] !== 0) return false;
+  }
+  return true;
+}
+
+function outputTick() {
+  const now = Date.now();
   const sendMonitor = monitorEnabled && (++monitorTick % MONITOR_EVERY === 0);
   const monitorUniverses = sendMonitor ? {} : null;
 
+  // Build ordered list of universes to send this tick
+  const toSend = [];
+
   for (const universe of activeUniverses) {
-    const inp = inputBuffer[universe];
-    const overrides = clientOverrides[universe];
-    const out = outputBuffer[universe];
+    const state = universeState[universe];
 
-    if (inputConfig.enabled) {
-      // Input mode: start with console input, overlay Lumina overrides
-      out.set(inp);
-      if (overrides) {
-        for (const chStr in overrides) {
-          const ch = parseInt(chStr);
-          if (ch >= 0 && ch < 512) {
-            out[ch] = overrides[chStr];
-          }
-        }
-      }
-      sendUniverse(universe, out);
+    // Merge data (input mode builds output, legacy already has it)
+    mergeUniverse(universe);
+
+    // Check idle transition: no change for IDLE_THRESHOLD and all zeros
+    if (!state.idle && !state.dirty && (now - state.lastChanged) > IDLE_THRESHOLD && isUniverseZero(universe)) {
+      state.idle = true;
     }
-    // Legacy mode: outputBuffer already populated by dmx_frame handler, no extra send needed
 
-    // Collect monitor data
+    // Determine if this universe should send this tick
+    let shouldSend = false;
+
+    if (state.dirty) {
+      // Immediate wake-up: data changed, send now
+      shouldSend = true;
+      state.dirty = false;
+      state.idle = false;
+    } else if (state.idle) {
+      // Heartbeat mode: send at 1Hz
+      shouldSend = (now - state.lastSent) >= HEARTBEAT_INTERVAL;
+    } else {
+      // Active mode: send at configured rate
+      shouldSend = (now - state.lastSent) >= outputRate;
+    }
+
+    if (shouldSend) {
+      toSend.push(universe);
+    }
+
+    // Collect monitor data (every tick, not just send ticks)
     if (sendMonitor) {
-      // Build override mask: which channels Lumina is controlling
+      const overrides = clientOverrides[universe];
       const ovChans = overrides ? Object.keys(overrides).map(Number) : [];
       monitorUniverses[universe] = {
-        input: Array.from(inp),
-        output: Array.from(out),
+        input: Array.from(inputBuffer[universe]),
+        output: Array.from(outputBuffer[universe]),
         overrides: ovChans
       };
+    }
+  }
+
+  // Staggered send: spread packets across the tick with 1ms gaps
+  for (let i = 0; i < toSend.length; i++) {
+    const universe = toSend[i];
+    if (i === 0) {
+      // First universe: send immediately
+      sendUniverse(universe, outputBuffer[universe]);
+      universeState[universe].lastSent = now;
+    } else {
+      // Stagger subsequent universes by 1ms each
+      const u = universe;
+      setTimeout(() => {
+        sendUniverse(u, outputBuffer[u]);
+        universeState[u].lastSent = Date.now();
+      }, i);
     }
   }
 
@@ -253,17 +385,27 @@ function mergeAndSend() {
   }
 }
 
+// Mark a universe as having changed data
+function markUniverseDirty(universe) {
+  const state = universeState[universe];
+  state.lastChanged = Date.now();
+  state.dirty = true;
+  state.idle = false;
+}
+
+const OUTPUT_TICK_RATE = 5; // 5ms tick resolution (200Hz scheduler)
+
 function startOutputLoop() {
   if (outputInterval) return;
-  outputInterval = setInterval(mergeAndSend, outputRate);
-  console.log(`[OUTPUT] Merge loop started at ${Math.round(1000 / outputRate)}Hz`);
+  outputInterval = setInterval(outputTick, OUTPUT_TICK_RATE);
+  console.log(`[OUTPUT] Smart scheduler started (${OUTPUT_TICK_RATE}ms tick, ${Math.round(1000 / outputRate)}Hz active, 1Hz heartbeat)`);
 }
 
 function stopOutputLoop() {
   if (outputInterval) {
     clearInterval(outputInterval);
     outputInterval = null;
-    console.log('[OUTPUT] Merge loop stopped');
+    console.log('[OUTPUT] Scheduler stopped');
   }
 }
 
@@ -277,6 +419,11 @@ const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
   console.log('[WS] Client connected');
+
+  // Send available NICs to client
+  const nics = getNetworkInterfaces();
+  ws.send(JSON.stringify({ type: 'nic_list', interfaces: nics, current: networkConfig }));
+  console.log('[NICS]', nics.map(n => `${n.name}:${n.ip}`).join(', ') || 'none');
 
   ws.on('message', (raw) => {
     try {
@@ -311,6 +458,41 @@ wss.on('connection', (ws) => {
         console.log('[MONITOR]', monitorEnabled ? 'ON' : 'OFF');
       }
 
+      // --- Network config (2-NIC setup) ---
+      if (msg.type === 'network_config') {
+        const oldInputIP = networkConfig.inputIP;
+        const oldOutputIP = networkConfig.outputIP;
+
+        if (msg.inputIP !== undefined) networkConfig.inputIP = msg.inputIP || '0.0.0.0';
+        if (msg.outputIP !== undefined) {
+          networkConfig.outputIP = msg.outputIP || '0.0.0.0';
+          // Find broadcast address for the selected output NIC
+          const nics = getNetworkInterfaces();
+          const outNic = nics.find(n => n.ip === msg.outputIP);
+          if (outNic) {
+            networkConfig.outputBroadcast = outNic.broadcast;
+            clientConfig.artnetHost = outNic.broadcast;
+          } else {
+            networkConfig.outputBroadcast = '255.255.255.255';
+            clientConfig.artnetHost = '255.255.255.255';
+          }
+        }
+
+        // Rebind input socket if input NIC changed
+        if (oldInputIP !== networkConfig.inputIP) {
+          rebindInputSocket(networkConfig.inputIP);
+        }
+
+        // Rebind output socket if output NIC changed
+        if (oldOutputIP !== networkConfig.outputIP) {
+          rebindOutputSocket(networkConfig.outputIP);
+        }
+
+        console.log('[NETWORK]', `IN: ${networkConfig.inputIP} | OUT: ${networkConfig.outputIP} → broadcast: ${networkConfig.outputBroadcast}`);
+        // Send updated config back to client
+        ws.send(JSON.stringify({ type: 'nic_list', interfaces: getNetworkInterfaces(), current: networkConfig }));
+      }
+
       // --- Output control ---
       if (msg.type === 'output_control') {
         outputEnabled = !!msg.enabled;
@@ -327,6 +509,7 @@ wss.on('connection', (ws) => {
             if (uni < 1 || uni > MAX_UNIVERSES) continue;
             clientOverrides[uni] = channels; // { "ch_index": value, ... }
             activeUniverses.add(uni);
+            markUniverseDirty(uni);
           }
           // Clear overrides for universes not in this frame
           for (let u = 1; u <= MAX_UNIVERSES; u++) {
@@ -342,8 +525,7 @@ wss.on('connection', (ws) => {
               outputBuffer[uni][i] = data[i] || 0;
             }
             activeUniverses.add(uni);
-            // Also send immediately (merge loop will re-send, but keeps latency low)
-            sendUniverse(uni, data);
+            markUniverseDirty(uni);
           }
         }
       }
