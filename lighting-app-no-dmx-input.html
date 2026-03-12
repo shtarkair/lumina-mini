@@ -129,10 +129,11 @@ function buildDMXFrames(liveValues, dmxPatch) {
     if (!patch) continue;
     const profile = DMX_PROFILES[patch.profile];
     if (!profile || !profile.map[paramId]) continue;
+    // Use per-param override if available, otherwise fall back to base address + offset
     let uni, addr, bits;
     if (patch.overrides && patch.overrides[paramId]) {
       const ov = patch.overrides[paramId];
-      if (ov.bypass) continue;
+      if (ov.bypass) continue; // Skip bypassed channels
       uni = ov.universe || patch.universe;
       addr = ov.channel;
       bits = ov.bits || profile.map[paramId].bits;
@@ -153,43 +154,6 @@ function buildDMXFrames(liveValues, dmxPatch) {
     }
   }
   return universes;
-}
-
-// Sparse override format: only channels with active cue values
-// Returns { "uni": { "ch_index": value, ... }, ... }
-function buildDMXOverrides(liveValues, dmxPatch) {
-  const overrides = {};
-  for (const [key, val] of Object.entries(liveValues)) {
-    const idx = key.indexOf("-");
-    const fxId = parseInt(key.substring(0, idx));
-    const paramId = key.substring(idx + 1);
-    const patch = dmxPatch[fxId];
-    if (!patch) continue;
-    const profile = DMX_PROFILES[patch.profile];
-    if (!profile || !profile.map[paramId]) continue;
-    let uni, addr, bits;
-    if (patch.overrides && patch.overrides[paramId]) {
-      const ov = patch.overrides[paramId];
-      if (ov.bypass) continue;
-      uni = ov.universe || patch.universe;
-      addr = ov.channel;
-      bits = ov.bits || profile.map[paramId].bits;
-    } else {
-      uni = patch.universe;
-      addr = patch.address + profile.map[paramId].offset;
-      bits = profile.map[paramId].bits;
-    }
-    if (addr < 1 || addr > 512) continue;
-    if (!overrides[uni]) overrides[uni] = {};
-    const scaled = scaleParam(paramId, val, bits);
-    if (bits === 16 && addr < 512) {
-      overrides[uni][addr - 1] = (scaled >> 8) & 0xFF;
-      overrides[uni][addr] = scaled & 0xFF;
-    } else {
-      overrides[uni][addr - 1] = scaled & 0xFF;
-    }
-  }
-  return overrides;
 }
 
 const BEAT_WIDTH=40, LANE_H=34, FIXTURE_HDR_H=28, GROUP_HDR_H=20, RULER_H=36, LABEL_W=130, PARAM_LABEL_W=100, TOTAL_BEATS=64;
@@ -897,10 +861,10 @@ function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEve
   const totalW = fixtures.length*(WW+GAP)-GAP+10;
 
   return (
-    <div style={{background:"#110b0b",borderTop:"2px solid #3a2020",flexShrink:0}}>
+    <div style={{background:"#0b0d11",borderTop:"2px solid #252930",flexShrink:0}}>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}@keyframes recglow{0%,100%{box-shadow:0 0 8px #ff220066}50%{box-shadow:0 0 18px #ff2200bb}}@keyframes midipulse{0%,100%{box-shadow:0 0 6px #aa44ff44}50%{box-shadow:0 0 14px #aa44ffaa}}@keyframes midilearn{0%,100%{box-shadow:0 0 8px #cc66ffaa}50%{box-shadow:0 0 20px #cc66ffff}}`}</style>
-      <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid #2a1a1a",padding:"4px 10px",gap:8,flexWrap:"wrap"}}>
-        <div style={{fontSize:7,color:"#5a3f3f",letterSpacing:2}}>PARAM:</div>
+      <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid #1a1d22",padding:"4px 10px",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:7,color:"#3a3f4c",letterSpacing:2}}>PARAM:</div>
         <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
           {PARAM_GROUPS.map(group => group.params.map(p => {
             const isSel = activeParam===p.id;
@@ -911,7 +875,7 @@ function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEve
           <button onClick={()=>setMode(m=>m==="rec"?null:"rec")} style={{padding:"4px 12px",background:mode==="rec"?"#ff2200":"#1a0a08",border:"2px solid "+(mode==="rec"?"#ff4422":"#3a1a14"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="rec"?"#fff":"#663322",boxShadow:mode==="rec"?"0 0 16px #ff220099":"none"}}>{mode==="rec"?"\u23FA REC":"\u23FA REC"}</button>
           <button onClick={()=>setMode(m=>m==="erase"?null:"erase")} style={{padding:"4px 12px",background:mode==="erase"?"#882200":"#100808",border:"2px solid "+(mode==="erase"?"#ff6600":"#2a1a10"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="erase"?"#ffaa44":"#443322"}}>{mode==="erase"?"\u2716 ERASE":"\u2716 ERASE"}</button>
           <button onClick={()=>setQuantize(q=>!q)} style={{padding:"4px 12px",background:quantize?"#162030":"#0c0f14",border:"2px solid "+(quantize?"#4488ff":"#252930"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:quantize?"#4488ff":"#333"}}>{"\u266A"} {quantize?"QUANT":"FREE"}</button>
-          <div style={{width:1,height:20,background:"#3a2020"}}/>
+          <div style={{width:1,height:20,background:"#252930"}}/>
           {!midiConnected ? (
             <button onClick={connectMidi} style={{padding:"4px 12px",background:"#0c0f14",border:"2px solid #252930",borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:"#555"}}>{"\uD83C\uDFB9"} MIDI</button>
           ) : (
@@ -1196,13 +1160,13 @@ function WaveformCanvas({ peaks, durationBeats, beatWidth, zoom, scrollLeft, wid
 function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, beatDetected, detectedBpm, audioVolume, setAudioVolume, audioMuted, setAudioMuted, onFileLoad, bpm, setBpm }) {
   const fileInputRef = useRef(null);
   return (
-    <div style={{height:30,background:'#14121a',borderBottom:'1px solid #2a2040',display:'flex',alignItems:'center',padding:'0 14px',gap:8,flexShrink:0}}>
+    <div style={{height:30,background:'#12141a',borderBottom:'1px solid #252930',display:'flex',alignItems:'center',padding:'0 14px',gap:8,flexShrink:0}}>
       <div style={{display:'flex',gap:2}}>
         {['none','file','mic'].map(mode => (
-          <button key={mode} onClick={()=>setAudioMode(mode)} style={{padding:'2px 8px',fontSize:9,fontWeight:audioMode===mode?'bold':'normal',background:audioMode===mode?'#221a2e':'#0c0e12',border:`1px solid ${audioMode===mode?'#aa66dd':'#2a2040'}`,color:audioMode===mode?'#aa66dd':'#555',borderRadius:3,cursor:'pointer',letterSpacing:1}}>{mode.toUpperCase()}</button>
+          <button key={mode} onClick={()=>setAudioMode(mode)} style={{padding:'2px 8px',fontSize:9,fontWeight:audioMode===mode?'bold':'normal',background:audioMode===mode?'#1e222a':'#0c0e12',border:`1px solid ${audioMode===mode?'#e8aa22':'#252930'}`,color:audioMode===mode?'#e8aa22':'#555',borderRadius:3,cursor:'pointer',letterSpacing:1}}>{mode.toUpperCase()}</button>
         ))}
       </div>
-      <div style={{width:1,height:18,background:'#2a2040'}}/>
+      <div style={{width:1,height:18,background:'#252930'}}/>
       {audioMode==='file'&&<>
         <input ref={fileInputRef} type="file" accept="audio/*" onChange={e=>e.target.files[0]&&onFileLoad(e.target.files[0])} style={{display:'none'}}/>
         <button onClick={()=>fileInputRef.current.click()} style={{padding:'2px 10px',fontSize:9,background:'#0c0e12',border:'1px solid #252930',color:'#888',borderRadius:3,cursor:'pointer'}}>{audioFileName||'Load Audio...'}</button>
@@ -1212,7 +1176,7 @@ function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, b
         <div style={{width:80,height:8,background:'#0c0e12',borderRadius:2,overflow:'hidden',border:'1px solid #1e222a'}}>
           <div style={{height:'100%',width:`${Math.min(100,audioLevel*300)}%`,background:audioLevel>0.6?'#ff5544':audioLevel>0.3?'#e8aa22':'#44ffaa',borderRadius:2,transition:'width 0.05s'}}/>
         </div>
-        <div style={{width:8,height:8,borderRadius:'50%',background:beatDetected?'#aa66dd':'#2a2040',boxShadow:beatDetected?'0 0 10px #aa66dd':'none',transition:'all 0.05s'}}/>
+        <div style={{width:8,height:8,borderRadius:'50%',background:beatDetected?'#e8aa22':'#252930',boxShadow:beatDetected?'0 0 10px #e8aa22':'none',transition:'all 0.05s'}}/>
       </>}
       {detectedBpm&&audioMode==='file'&&<>
         <span style={{fontSize:9,color:'#44ffaa',letterSpacing:0.5}}>SYNC: {detectedBpm}{"\u2192"}{bpm} BPM ({(bpm/detectedBpm).toFixed(2)}x)</span>
@@ -1221,7 +1185,7 @@ function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, b
       {audioMode!=='none'&&<div style={{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}}>
         <button onClick={()=>setAudioMuted(m=>!m)} style={{padding:'2px 6px',fontSize:9,background:audioMuted?'#ff554422':'#0c0e12',border:`1px solid ${audioMuted?'#ff5544':'#252930'}`,color:audioMuted?'#ff5544':'#888',borderRadius:3,cursor:'pointer',fontWeight:audioMuted?'bold':'normal'}}>{audioMuted?'MUTED':'MUTE'}</button>
         <span style={{fontSize:8,color:'#444'}}>VOL</span>
-        <input type="range" min={0} max={1} step={0.01} value={audioVolume} onChange={e=>setAudioVolume(+e.target.value)} style={{width:60,accentColor:audioMuted?'#555':'#aa66dd',opacity:audioMuted?0.4:1}}/>
+        <input type="range" min={0} max={1} step={0.01} value={audioVolume} onChange={e=>setAudioVolume(+e.target.value)} style={{width:60,accentColor:audioMuted?'#555':'#e8aa22',opacity:audioMuted?0.4:1}}/>
         <span style={{fontSize:8,color:'#555'}}>{audioMuted?'--':Math.round(audioVolume*100)+'%'}</span>
       </div>}
     </div>
@@ -1358,15 +1322,10 @@ function LightingTimeline() {
   const [dmxPatch, setDmxPatch] = useState(() => {
     try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(fixtures); } catch(e) { return generateDefaultPatch(fixtures); }
   });
-  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25, inputEnabled:false, inputSourceIP:"", inputMonitor:false });
+  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25 });
   const [outputConnected, setOutputConnected] = useState(false);
   const dmxPatchRef = useRef(dmxPatch);
   const [dmxPatchModalOpen, setDmxPatchModalOpen] = useState(false);
-  const [dmxMonitorOpen, setDmxMonitorOpen] = useState(false);
-  const dmxMonitorOpenRef = useRef(false);
-  const [monitorUniverse, setMonitorUniverse] = useState(1);
-  const monitorDataRef = useRef({});
-  const [monitorTick, setMonitorTick] = useState(0);
   const [keypadState, setKeypadState] = useState(null); // { fxId, paramId, field:'universe'|'channel', value:'', rect:{top,left} }
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
 
@@ -1448,32 +1407,20 @@ function LightingTimeline() {
   useEffect(() => { liveValuesRef.current = liveValues; }, [liveValues]);
   const outputWsRef = useRef(null);
   const outputReconnectRef = useRef(null);
-  const inputMonitorRef = useRef({});
 
   useEffect(() => {
+    if (!outputConfig.enabled) {
+      if (outputWsRef.current) { outputWsRef.current.close(); outputWsRef.current = null; }
+      if (outputReconnectRef.current) { clearTimeout(outputReconnectRef.current); outputReconnectRef.current = null; }
+      setOutputConnected(false);
+      return;
+    }
     let closed = false;
     const connect = () => {
       if (closed) return;
       try {
         const ws = new WebSocket(`ws://${location.host}`);
-        ws.onopen = () => {
-          setOutputConnected(true);
-          ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate }));
-          ws.send(JSON.stringify({ type:"input_config", enabled:outputConfig.inputEnabled, sourceIP:outputConfig.inputSourceIP||null, forwardToClient:outputConfig.inputMonitor }));
-          ws.send(JSON.stringify({ type:"output_control", enabled:outputConfig.enabled }));
-          if (dmxMonitorOpenRef.current) ws.send(JSON.stringify({ type:"monitor", enabled:true }));
-        };
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'dmx_input' && msg.universe && msg.data) {
-              inputMonitorRef.current[msg.universe] = msg.data;
-            }
-            if (msg.type === 'dmx_monitor' && msg.universes) {
-              monitorDataRef.current = msg.universes;
-            }
-          } catch(e) {}
-        };
+        ws.onopen = () => { setOutputConnected(true); ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost })); };
         ws.onclose = () => { setOutputConnected(false); if (!closed) outputReconnectRef.current = setTimeout(connect, 2000); };
         ws.onerror = () => ws.close();
         outputWsRef.current = ws;
@@ -1481,60 +1428,27 @@ function LightingTimeline() {
     };
     connect();
     return () => { closed = true; if (outputWsRef.current) outputWsRef.current.close(); if (outputReconnectRef.current) clearTimeout(outputReconnectRef.current); };
-  }, []);
-
-  // Send output_control when enabled changes
-  useEffect(() => {
-    if (outputWsRef.current?.readyState === WebSocket.OPEN) {
-      outputWsRef.current.send(JSON.stringify({ type:"output_control", enabled:outputConfig.enabled }));
-    }
   }, [outputConfig.enabled]);
 
   // Send config updates when protocol settings change
   useEffect(() => {
     if (outputWsRef.current?.readyState === WebSocket.OPEN) {
-      outputWsRef.current.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate }));
+      outputWsRef.current.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost }));
     }
-  }, [outputConfig.artnet, outputConfig.sacn, outputConfig.artnetHost, outputConfig.dmxRate]);
-
-  // Send input config updates
-  useEffect(() => {
-    if (outputWsRef.current?.readyState === WebSocket.OPEN) {
-      outputWsRef.current.send(JSON.stringify({ type:"input_config", enabled:outputConfig.inputEnabled, sourceIP:outputConfig.inputSourceIP||null, forwardToClient:outputConfig.inputMonitor }));
-    }
-  }, [outputConfig.inputEnabled, outputConfig.inputSourceIP, outputConfig.inputMonitor]);
-
-  // DMX Monitor: enable/disable server broadcasting + refresh tick
-  useEffect(() => {
-    if (outputWsRef.current?.readyState === WebSocket.OPEN) {
-      outputWsRef.current.send(JSON.stringify({ type:"monitor", enabled:dmxMonitorOpen }));
-    }
-    dmxMonitorOpenRef.current = dmxMonitorOpen;
-    if (!dmxMonitorOpen) return;
-    const iv = setInterval(() => setMonitorTick(t => t + 1), 100); // 10Hz refresh
-    return () => clearInterval(iv);
-  }, [dmxMonitorOpen]);
+  }, [outputConfig.artnet, outputConfig.sacn, outputConfig.artnetHost]);
 
   // Output loop: build DMX frames and send at configured rate
   useEffect(() => {
     if (!outputConfig.enabled) return;
-    const useInput = outputConfig.inputEnabled;
     const iv = setInterval(() => {
       const ws = outputWsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (useInput) {
-        // Input mode: send sparse overrides (only active cue channels)
-        const overrides = buildDMXOverrides(liveValuesRef.current, dmxPatchRef.current);
-        ws.send(JSON.stringify({ type:"dmx_frame", overrides }));
-      } else {
-        // Legacy mode: send full universe frames
-        const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
-        if (Object.keys(universes).length === 0) return;
-        ws.send(JSON.stringify({ type:"dmx_frame", universes }));
-      }
+      const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
+      if (Object.keys(universes).length === 0) return;
+      ws.send(JSON.stringify({ type:"dmx_frame", universes }));
     }, outputConfig.dmxRate);
     return () => clearInterval(iv);
-  }, [outputConfig.enabled, outputConfig.dmxRate, outputConfig.inputEnabled]);
+  }, [outputConfig.enabled, outputConfig.dmxRate]);
 
   const rows=[];
   let yOff=0;
@@ -1754,15 +1668,15 @@ function LightingTimeline() {
 @keyframes selectglow{0%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}25%{box-shadow:0 0 12px #44ffaa88,0 0 24px #44ffaa44,0 0 36px #44ffaa22,inset 0 0 10px #44ffaa22;border-color:#44ffaacc}50%{box-shadow:0 0 6px #44ffaa55,0 0 14px #44ffaa33,inset 0 0 8px #44ffaa15;border-color:#44ffaa99}75%{box-shadow:0 0 16px #44ffaaaa,0 0 30px #44ffaa55,0 0 44px #44ffaa22,inset 0 0 12px #44ffaa33;border-color:#44ffaadd}100%{box-shadow:0 0 4px #44ffaa44,0 0 8px #44ffaa22,inset 0 0 6px #44ffaa11;border-color:#44ffaa88}}
 @keyframes seqstore{0%,100%{box-shadow:0 0 4px #e8aa2244;border-color:#e8aa2288;background:#1a150066}50%{box-shadow:0 0 10px #e8aa2288,0 0 20px #e8aa2244;border-color:#e8aa22;background:#2a1a0088}}
 @keyframes seqclear{0%,100%{box-shadow:0 0 4px #ff554444;border-color:#ff554488;background:#1c0f0f66}50%{box-shadow:0 0 10px #ff554488,0 0 20px #ff554444;border-color:#ff5544;background:#2a0f0f88}}`}</style>
-      <div style={{height:46,background:"#1e1c16",borderBottom:"1px solid #3a3020",display:"flex",alignItems:"center",padding:"0 14px",gap:10,flexShrink:0}}>
-        <span style={{color:"#cc9944",fontWeight:"bold",fontSize:13,letterSpacing:3}}>{"\u2728"} LUMINA FX</span>
-        <div style={{width:1,height:22,background:"#3a3020"}}/>
+      <div style={{height:46,background:"#1e2230",borderBottom:"1px solid #2e3440",display:"flex",alignItems:"center",padding:"0 14px",gap:10,flexShrink:0}}>
+        <span style={{color:"#e8aa22",fontWeight:"bold",fontSize:13,letterSpacing:3}}>{"\u2728"} LUMINA FX</span>
+        <div style={{width:1,height:22,background:"#252930"}}/>
         {[{icon:"\u23EE",fn:()=>{setPlayhead(0);if(audioMode==="file"&&playing)audioEngine.seekTo(0);}},{icon:"\u23F9",fn:()=>{setPlaying(false);setPlayhead(loopStart);audioEngine.stopFilePlayback();}},{icon:playing?"\u23F8":"\u25B6",fn:()=>{if(!playing&&audioMode!=="none")audioEngine.ensureContext();setPlaying(p=>!p);},active:playing}].map((b,i)=>(
-          <button key={i} onClick={b.fn} style={{background:b.active?"#cc9944":"#1e1c16",border:"1px solid "+(b.active?"#cc9944":"#3a3020"),color:b.active?"#111":"#c0c6d0",borderRadius:4,padding:"3px 12px",cursor:"pointer",fontSize:14}}>{b.icon}</button>
+          <button key={i} onClick={b.fn} style={{background:b.active?"#e8aa22":"#1e222a",border:"1px solid "+(b.active?"#e8aa22":"#2e3340"),color:b.active?"#111":"#c0c6d0",borderRadius:4,padding:"3px 12px",cursor:"pointer",fontSize:14}}>{b.icon}</button>
         ))}
-        <div style={{width:1,height:22,background:"#3a3020"}}/>
+        <div style={{width:1,height:22,background:"#252930"}}/>
         <span style={{fontSize:9,color:"#555"}}>BPM</span>
-        <input type="number" value={bpm} min={20} max={1200} onChange={e=>setBpm(+e.target.value)} style={{width:52,background:"#0c0e12",border:"1px solid #3a3020",color:"#cc9944",borderRadius:3,padding:"2px 6px",fontSize:12,textAlign:"center"}}/>
+        <input type="number" value={bpm} min={20} max={1200} onChange={e=>setBpm(+e.target.value)} style={{width:52,background:"#0c0e12",border:"1px solid #2e3340",color:"#e8aa22",borderRadius:3,padding:"2px 6px",fontSize:12,textAlign:"center"}}/>
         <div style={{background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"2px 10px",fontSize:12,color:"#44ffaa",letterSpacing:2,minWidth:100,textAlign:"center"}}>
           {String(Math.floor(playhead/4)+1).padStart(3,"0")} : {Math.floor(playhead%4)+1}
           <span style={{fontSize:8,color:"#333",marginLeft:4}}>BAR.BEAT</span>
@@ -1781,11 +1695,11 @@ function LightingTimeline() {
           <button key={t.id} onClick={()=>setTool(t.id)} style={{background:t.id==="erase"&&tool===t.id?"linear-gradient(135deg,#3a1a1a,#662222aa,#3a1a1a)":(t.id==="select"&&tool===t.id?"linear-gradient(135deg,#1a2a1a,#44ffaa33,#1a2a1a)":(tool===t.id?"#e8aa22":"#1e222a")),backgroundSize:(t.id==="erase"||t.id==="select")&&tool===t.id?"400% 100%":"auto",border:"1px solid "+(t.id==="erase"&&tool===t.id?"#ff4444":t.id==="select"&&tool===t.id?"#44ffaa":tool===t.id?"#e8aa22":"#2e3340"),color:t.id==="erase"&&tool===t.id?"#ff4444":(t.id==="select"&&tool===t.id?"#44ffaa":(tool===t.id?"#111":"#777")),borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,animation:t.id==="erase"&&tool===t.id?"eraseglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":(t.id==="select"&&tool===t.id?"selectglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":"none"),transition:"all 0.3s ease",boxShadow:t.id==="select"&&tool===t.id?"0 0 12px #44ffaa44, inset 0 0 8px #44ffaa22":"none"}}>{t.icon}</button>
         ))}
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCues(null);}else{setCopyMode(true);const sel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):selectedCue?cues.filter(c=>c.id===selectedCue):[];if(sel.length>0){setCopiedCues(sel.map(c=>({...c,id:null})));}}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCues?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCues?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCues?`PASTE (${copiedCues.length})`:"COPY"):"COPY"}</button>
-        <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e1c16",border:"1px solid "+(undoHistoryRef.current.length?"#cc994466":"#3a3020"),color:undoHistoryRef.current.length?"#cc9944":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
+        <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e222a",border:"1px solid "+(undoHistoryRef.current.length?"#e8aa2266":"#2e3340"),color:undoHistoryRef.current.length?"#e8aa22":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
-          <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#cc9944"}}/>
+          <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#e8aa22"}}/>
           <span style={{fontSize:9,color:"#555"}}>{Math.round(zoom*100)}%</span>
         </div>
       </div>
@@ -1795,7 +1709,7 @@ function LightingTimeline() {
       <div style={{display:"flex",flex:1,overflow:"hidden"}}>
         <div ref={timelineRef} onMouseDown={handleGridMouseDown} onScroll={e=>setScrollLeft(e.target.scrollLeft)} style={{flex:1,overflow:"auto",position:"relative",cursor:copyMode?(copiedCues?"copy":"cell"):tool==="draw"?"crosshair":tool==="erase"?"not-allowed":"default"}}>
           <div style={{width:LABEL_W+PARAM_LABEL_W+totalW,minHeight:(RULER_H+(waveformPeaks?40:0))+totalH}}>
-            <div style={{position:"sticky",top:0,zIndex:20,width:LABEL_W+PARAM_LABEL_W+totalW,background:"#161a28",borderBottom:"1px solid #1e2a44"}}>
+            <div style={{position:"sticky",top:0,zIndex:20,width:LABEL_W+PARAM_LABEL_W+totalW,background:"#1a1e28",borderBottom:"1px solid #2e3440"}}>
               <div style={{height:RULER_H,display:"flex"}}>
                 <div style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #252930",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"#2a2e38",letterSpacing:2}}>FIXTURE {"\u00BB"} PARAMETER</div>
                 <div style={{position:"relative",flex:1}}>
@@ -1816,7 +1730,7 @@ function LightingTimeline() {
                     ))}
                   </>}
                   {Array.from({length:TOTAL_BEATS+1}).map((_,i)=>i%4===0&&(
-                    <div key={i} style={{position:"absolute",top:0,left:beatToX(i),height:"100%",borderLeft:i%4===0?`2px solid ${i%16===0?"#4488ffcc":"#4488ff66"}`:"1px solid #2a3040",paddingLeft:3,paddingTop:i%16===0?5:10,fontSize:i%16===0?10:8,color:i%16===0?"#4488ff":"#888",fontWeight:i%16===0?"bold":"normal"}}>
+                    <div key={i} style={{position:"absolute",top:0,left:beatToX(i),height:"100%",borderLeft:i%4===0?`2px solid ${i%16===0?"#e8aa22cc":"#e8aa2266"}`:"1px solid #2a3040",paddingLeft:3,paddingTop:i%16===0?5:10,fontSize:i%16===0?10:8,color:i%16===0?"#e8aa22":"#888",fontWeight:i%16===0?"bold":"normal"}}>
                       {i%16===0?`\u266B${Math.floor(i/4)+1}`:`${Math.floor(i/4)+1}`}
                     </div>
                   ))}
@@ -1839,7 +1753,7 @@ function LightingTimeline() {
                 const isExp=expandedFixtures.has(fx.id);
                 const hasActive=cues.some(c=>c.fixtureId===fx.id&&playhead>=c.beat&&playhead<c.beat+c.duration);
                 return(
-                  <div key={`fx-${fx.id}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:"#1a2238",borderBottom:"1px solid #2a3a55",zIndex:6}}>
+                  <div key={`fx-${fx.id}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:"#222838",borderBottom:"1px solid #3a4050",zIndex:6}}>
                     <div onClick={()=>toggleFixture(fx.id)} style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #3a4050",display:"flex",alignItems:"center",padding:"0 8px",gap:7,cursor:"pointer"}}>
                       <span style={{fontSize:8,color:"#555"}}>{isExp?"\u25BC":"\u25B6"}</span>
                       <div style={{width:10,height:10,borderRadius:"50%",background:hasActive?fx.color:"#252930",boxShadow:hasActive?`0 0 10px ${fx.color}`:"none",transition:"all 0.05s"}}/>
@@ -1877,7 +1791,7 @@ function LightingTimeline() {
                 const laneCues=cues.filter(c=>c.fixtureId===row.fixtureId&&c.param===row.paramId);
                 const liveVal=liveValues[laneKey];
                 return(
-                  <div key={laneKey} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:isMuted?"#12141a":ri%2===0?"#141828":"#161a2c",borderBottom:"1px solid #1e2840"}}>
+                  <div key={laneKey} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:isMuted?"#12141a":ri%2===0?"#151a24":"#171c28",borderBottom:"1px solid #222838"}}>
                     <div style={{width:LABEL_W,flexShrink:0,borderRight:"1px solid #1a1e26"}}/>
                     <div style={{width:PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #1e222a",display:"flex",alignItems:"center",padding:"0 5px",gap:4}}>
                       <div style={{width:3,height:20,borderRadius:1,background:param.color,opacity:isMuted?0.15:0.5,flexShrink:0}}/>
@@ -1886,13 +1800,13 @@ function LightingTimeline() {
                         <div style={{fontSize:7,color:"#2e3340"}}>{param.min}-{param.max}{param.unit}</div>
                       </div>
                       <button onClick={toggleMute} style={{padding:"1px 4px",fontSize:8,fontWeight:"bold",background:isMuted?"#ff440033":"transparent",border:isMuted?"1px solid #ff440066":"1px solid #252930",color:isMuted?"#ff6633":"#333",borderRadius:2,cursor:"pointer",lineHeight:1.2,flexShrink:0,letterSpacing:0.5}}>M</button>
-                      <div style={{fontSize:10,fontWeight:"bold",color:isMuted?"#ff440066":liveVal!==undefined?"#4488ff":"#2a2e38",minWidth:30,textAlign:"right",flexShrink:0,transition:"color 0.1s"}}>
+                      <div style={{fontSize:10,fontWeight:"bold",color:isMuted?"#ff440066":liveVal!==undefined?"#e8aa22":"#2a2e38",minWidth:30,textAlign:"right",flexShrink:0,transition:"color 0.1s"}}>
                         {isMuted?"M":liveVal!==undefined?Math.round(liveVal):"\u2014"}
                       </div>
                     </div>
                     <div style={{position:"relative",flex:1,height:"100%",overflow:"hidden"}}>
                       {Array.from({length:TOTAL_BEATS+1}).map((_,i)=>(
-                        <div key={i} style={{position:"absolute",top:0,left:beatToX(i),width:i%4===0?2:1,height:"100%",background:i%16===0?"#4488ff44":i%4===0?"#4488ff22":"#1e2230",pointerEvents:"none"}}/>
+                        <div key={i} style={{position:"absolute",top:0,left:beatToX(i),width:i%4===0?2:1,height:"100%",background:i%16===0?"#e8aa2244":i%4===0?"#e8aa2222":"#1e2230",pointerEvents:"none"}}/>
                       ))}
                       {loopEnabled&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(loopStart),width:beatToX(loopEnd-loopStart),background:"rgba(68,255,170,0.03)",pointerEvents:"none"}}/>}
                       {rightTab==="fx"&&<div style={{position:"absolute",top:0,height:"100%",left:beatToX(fxStart),width:beatToX(fxEnd-fxStart),background:"rgba(187,68,255,0.03)",pointerEvents:"none"}}/>}
@@ -1923,7 +1837,7 @@ function LightingTimeline() {
           </div>
         </div>
 
-        <div style={{width:rightPanelWide?440:220,background:"#141e14",borderLeft:"1px solid #1e3a1e",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
+        <div style={{width:rightPanelWide?440:220,background:"#1c2030",borderLeft:"1px solid #2e3440",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
           <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
             {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"},{id:"out",label:"OUT"}].map(tab=>(
               <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1a2a1a":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #44cc44":"2px solid transparent",color:rightTab===tab.id?"#44cc44":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
@@ -1947,7 +1861,7 @@ function LightingTimeline() {
                   ].map(row=>(
                     <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2}}>
                       <span style={{fontSize:8,color:"#3a3f4c",letterSpacing:1}}>{row.label}</span>
-                      <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #1e3a1e",color:"#44cc44",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
+                      <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #252930",color:"#e8aa22",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
                       <input type="range" min={row.min} max={row.max} step={row.step} value={row.val} onChange={e=>updateCue(row.key,+e.target.value)} style={{width:"100%",accentColor:selParam.color}}/>
                     </div>
                   ))}
@@ -2026,22 +1940,6 @@ function LightingTimeline() {
                   </label>
                 </div>
 
-                <div style={{fontSize:8,color:"#4488ff66",letterSpacing:2,marginTop:4}}>ARTNET INPUT</div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <button onClick={()=>setOutputConfig(c=>({...c,inputEnabled:!c.inputEnabled}))} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:outputConfig.inputEnabled?"#0a1a2a":"#0c0e12",border:"2px solid "+(outputConfig.inputEnabled?"#4488ff":"#252930"),color:outputConfig.inputEnabled?"#4488ff":"#555",borderRadius:4,cursor:"pointer"}}>{outputConfig.inputEnabled?"INPUT ON":"INPUT OFF"}</button>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:outputConfig.inputEnabled?"#4488ff":"#333",boxShadow:outputConfig.inputEnabled?"0 0 8px #4488ff88":"none"}}/>
-                </div>
-                {outputConfig.inputEnabled&&<>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:8,color:"#555"}}>Source IP:</span>
-                    <input value={outputConfig.inputSourceIP} onChange={e=>setOutputConfig(c=>({...c,inputSourceIP:e.target.value}))} placeholder="any" style={{flex:1,background:"#0c0e12",border:"1px solid #1e2a44",color:"#4488ff",borderRadius:3,padding:"2px 6px",fontSize:10}}/>
-                  </div>
-                  <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                    <input type="checkbox" checked={outputConfig.inputMonitor} onChange={e=>setOutputConfig(c=>({...c,inputMonitor:e.target.checked}))} style={{accentColor:"#4488ff"}}/>
-                    <span style={{fontSize:10,color:outputConfig.inputMonitor?"#4488ff":"#555"}}>Monitor Input</span>
-                  </label>
-                </>}
-
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX RATE</div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <input type="range" min={10} max={50} value={outputConfig.dmxRate} onChange={e=>setOutputConfig(c=>({...c,dmxRate:+e.target.value}))} style={{flex:1,accentColor:"#ff8844"}}/>
@@ -2053,7 +1951,6 @@ function LightingTimeline() {
                   <button onClick={()=>setFixtureManagerOpen(true)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #44aaff44",color:"#44aaff",borderRadius:4,cursor:"pointer"}}>{"\u2699"} FIXTURES</button>
                   <button onClick={()=>setDmxPatchModalOpen(true)} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #ff884444",color:"#ff8844",borderRadius:4,cursor:"pointer"}}>OPEN PATCH</button>
                 </div>
-                <button onClick={()=>setDmxMonitorOpen(true)} style={{padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:dmxMonitorOpen?"#0a1a2a":"#0c0e12",border:"2px solid "+(dmxMonitorOpen?"#4488ff":"#4488ff44"),color:"#4488ff",borderRadius:4,cursor:"pointer",marginTop:2}}>{"\u25A3"} DMX MONITOR</button>
                 <div style={{display:"flex",flexDirection:"column",gap:1,marginTop:4}}>
                   {fixtures.map(fx => {
                     const p = dmxPatch[fx.id];
@@ -2213,70 +2110,10 @@ function LightingTimeline() {
         </div>
       )}
 
-      {/* DMX Monitor Modal */}
-      {dmxMonitorOpen && (
-        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.85)",zIndex:9999,display:"flex",flexDirection:"column"}} onClick={()=>setDmxMonitorOpen(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{flex:1,display:"flex",flexDirection:"column",margin:20,background:"#0a0c14",border:"1px solid #1e2a44",borderRadius:8,overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.9)"}}>
-            <div style={{display:"flex",alignItems:"center",padding:"8px 16px",borderBottom:"1px solid #1e2a44",gap:8}}>
-              <span style={{fontSize:12,fontWeight:"bold",color:"#4488ff",letterSpacing:2}}>{"\u25A3"} DMX MONITOR</span>
-              <div style={{display:"flex",gap:2,marginLeft:12,flexWrap:"wrap"}}>
-                {Array.from({length:64},(_,i)=>i+1).map(u=>{
-                  const md=monitorDataRef.current[u];
-                  const hasData=md&&(md.input.some(v=>v>0)||md.output.some(v=>v>0));
-                  if(u>4&&!hasData&&u!==monitorUniverse) return null;
-                  return <button key={u} onClick={()=>setMonitorUniverse(u)} style={{padding:"2px 6px",fontSize:8,fontWeight:monitorUniverse===u?"bold":"normal",background:monitorUniverse===u?"#1a2a44":"#0c0e12",border:"1px solid "+(monitorUniverse===u?"#4488ff":hasData?"#4488ff44":"#1e222a"),color:monitorUniverse===u?"#4488ff":hasData?"#4488ff88":"#333",borderRadius:3,cursor:"pointer",minWidth:24}}>{u}</button>;
-                })}
-              </div>
-              <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:12}}>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <div style={{width:8,height:8,borderRadius:2,background:"#4488ff55"}}/>
-                  <span style={{fontSize:8,color:"#4488ff88"}}>INPUT</span>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <div style={{width:8,height:8,borderRadius:2,background:"#44cc4455"}}/>
-                  <span style={{fontSize:8,color:"#44cc4488"}}>LUMINA</span>
-                </div>
-                <span style={{fontSize:8,color:"#333"}}>UNI {monitorUniverse}</span>
-                <button onClick={()=>setDmxMonitorOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>{"\u2715"}</button>
-              </div>
-            </div>
-            <div style={{flex:1,overflow:"auto",padding:8}}>
-              {(()=>{
-                const md=monitorDataRef.current[monitorUniverse];
-                const inp=md?md.input:new Array(512).fill(0);
-                const out=md?md.output:new Array(512).fill(0);
-                const ovSet=md?new Set(md.overrides):new Set();
-                const COLS=32,ROWS=16;
-                return <div style={{display:"grid",gridTemplateColumns:`repeat(${COLS},1fr)`,gap:1,fontFamily:"monospace",fontSize:9}}>
-                  {Array.from({length:512},(_,i)=>{
-                    const isOverride=ovSet.has(i);
-                    const val=out[i]||0;
-                    const inVal=inp[i]||0;
-                    const brightness=Math.max(0.05,val/255);
-                    const bgColor=isOverride
-                      ?`rgba(68,204,68,${brightness*0.4})`
-                      :val>0?`rgba(68,136,255,${brightness*0.35})`
-                      :"rgba(255,255,255,0.02)";
-                    const borderColor=isOverride
-                      ?`rgba(68,204,68,${Math.max(0.15,brightness*0.5)})`
-                      :val>0?`rgba(68,136,255,${Math.max(0.1,brightness*0.3)})`
-                      :"rgba(255,255,255,0.05)";
-                    return <div key={i} style={{padding:"3px 2px",background:bgColor,border:`1px solid ${borderColor}`,borderRadius:2,textAlign:"center",minHeight:28,display:"flex",flexDirection:"column",justifyContent:"center",cursor:"default"}} title={`Ch ${i+1} | IN: ${inVal} | OUT: ${val}${isOverride?" (LUMINA)":""}`}>
-                      <div style={{fontSize:7,color:"#555",lineHeight:1}}>{i+1}</div>
-                      <div style={{fontSize:10,fontWeight:val>0?"bold":"normal",color:isOverride?(val>0?"#44cc44":"#1a3a1a"):val>0?"#4488ff":"#1a1a22",lineHeight:1.2}}>{val}</div>
-                    </div>;
-                  })}
-                </div>;
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-
       <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
 
-      <div style={{height:22,background:"#1a1814",borderTop:"1px solid #3a3020",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
-        {[{label:"FIX",val:fixtures.length},{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"},{label:"INPUT",val:outputConfig.inputEnabled?"ON":"OFF"}].map(item=>(
+      <div style={{height:22,background:"#141820",borderTop:"1px solid #252930",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
+        {[{label:"FIX",val:fixtures.length},{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"}].map(item=>(
           <span key={item.label} style={{fontSize:8,color:"#444"}}>
             <span style={{color:"#252930",marginRight:4}}>{item.label}</span>
             <span style={{color:"#666"}}>{item.val}</span>
