@@ -2023,7 +2023,7 @@ function LightingTimeline() {
                   {outputConfig.artnet && (
                     <div style={{marginLeft:20,display:"flex",alignItems:"center",gap:4}}>
                       <span style={{fontSize:8,color:"#555"}}>Host:</span>
-                      <input value={outputConfig.artnetHost} onChange={e=>setOutputConfig(c=>({...c,artnetHost:e.target.value}))} style={{flex:1,background:"#0c0e12",border:"1px solid #252930",color:"#ff8844",borderRadius:3,padding:"2px 6px",fontSize:10}}/>
+                      <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'ip_host',value:outputConfig.artnetHost||'',rect:{top:r.bottom+2,left:r.left}});}} style={{flex:1,background:"#0c0e12",border:"1px solid "+(keypadState?.field==='ip_host'?"#ff8844":"#252930"),color:"#ff8844",borderRadius:3,padding:"3px 6px",fontSize:10,cursor:"pointer",userSelect:"none",minHeight:18}}>{outputConfig.artnetHost||'0.0.0.0'}</div>
                     </div>
                   )}
                   <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
@@ -2041,7 +2041,7 @@ function LightingTimeline() {
                 {outputConfig.inputEnabled&&<>
                   <div style={{display:"flex",alignItems:"center",gap:4}}>
                     <span style={{fontSize:8,color:"#555"}}>Source IP:</span>
-                    <input value={outputConfig.inputSourceIP} onChange={e=>setOutputConfig(c=>({...c,inputSourceIP:e.target.value}))} placeholder="any" style={{flex:1,background:"#0c0e12",border:"1px solid #1e2a44",color:"#4488ff",borderRadius:3,padding:"2px 6px",fontSize:10}}/>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'ip_source',value:outputConfig.inputSourceIP||'',rect:{top:r.bottom+2,left:r.left}});}} style={{flex:1,background:"#0c0e12",border:"1px solid "+(keypadState?.field==='ip_source'?"#4488ff":"#1e2a44"),color:"#4488ff",borderRadius:3,padding:"3px 6px",fontSize:10,cursor:"pointer",userSelect:"none",minHeight:18}}>{outputConfig.inputSourceIP||'any'}</div>
                   </div>
                   <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
                     <input type="checkbox" checked={outputConfig.inputMonitor} onChange={e=>setOutputConfig(c=>({...c,inputMonitor:e.target.checked}))} style={{accentColor:"#4488ff"}}/>
@@ -2102,6 +2102,44 @@ function LightingTimeline() {
           </div>
         </div>
       </div>
+
+      {/* IP Keypad Popup */}
+      {keypadState && (keypadState.field==='ip_host'||keypadState.field==='ip_source') && (() => {
+        const isHost = keypadState.field === 'ip_host';
+        const color = isHost ? '#ff8844' : '#4488ff';
+        const label = isHost ? 'HOST IP' : 'SOURCE IP';
+        const applyIp = (val) => {
+          const ip = val || (isHost ? '127.0.0.1' : '');
+          setOutputConfig(c => isHost ? {...c, artnetHost: ip} : {...c, inputSourceIP: ip});
+          setKeypadState(null);
+        };
+        const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+        const kpDot = () => setKeypadState(prev => ({...prev, value: (prev.dirty ? prev.value : '') + '.', dirty: true}));
+        const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
+        const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
+        return (
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-260),left:Math.min(keypadState.rect.left, window.innerWidth-170),width:160,background:"#141820",border:"1px solid "+color+"66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                <span style={{fontSize:8,color:color+"88",letterSpacing:1}}>{label}</span>
+              </div>
+              <div style={{background:"#080a0e",border:"1px solid "+color+"44",borderRadius:3,padding:"6px 8px",fontSize:14,color:keypadState.dirty?color:color+"66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:1}}>{keypadState.value || (isHost?'0.0.0.0':'any')}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+                {[1,2,3,4,5,6,7,8,9].map(d => (
+                  <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                ))}
+                <button onClick={kpDot} style={{padding:"8px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid "+color+"44",color:color,borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>.</button>
+                <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+                <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                <button onClick={()=>{if(keypadState.dirty){applyIp(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Fixture Manager Modal */}
       {fixtureManagerOpen && (
