@@ -613,14 +613,31 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
   const fileInputRef = useRef(null);
 
   const handleSave = () => {
+    // Read midiMap and customProfiles from localStorage (they live in child component / global scope)
+    let midiMapData = {};
+    try { midiMapData = JSON.parse(localStorage.getItem("lumina-midi-map") || "{}"); } catch(e) {}
+    let customProfilesData = {};
+    try { customProfilesData = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
     const data = {
       type: "lumina-project",
-      version: 2,
+      version: 3,
       savedAt: new Date().toISOString(),
-      fixtures: fixtures,
-      cues: cues,
-      sequenceStorage: sequenceStorage,
+      // Show data
+      fixtures,
+      cues,
+      dmxPatch,
+      sequenceStorage,
       mutedLanes: [...mutedLanes],
+      // Config
+      bpm,
+      loopStart,
+      loopEnd,
+      loopEnabled,
+      outputConfig,
+      nicConfig,
+      // External state (from localStorage)
+      midiMap: midiMapData,
+      customProfiles: customProfilesData,
     };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -640,11 +657,36 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
       try {
         const data = JSON.parse(ev.target.result);
         if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
-        if(data.fixtures) { setFixtures(data.fixtures); setDmxPatch(generateDefaultPatch(data.fixtures)); }
+        // Fixtures + patch
+        if(data.fixtures) setFixtures(data.fixtures);
+        if(data.dmxPatch) setDmxPatch(data.dmxPatch);
+        else if(data.fixtures) setDmxPatch(generateDefaultPatch(data.fixtures));
+        // Cues
         if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
+        // Sequences
         if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
         if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
-      } catch(err) { alert("Failed to load file: " + err.message); }
+        // Config (v3+)
+        if(data.bpm !== undefined) setBpm(data.bpm);
+        if(data.loopStart !== undefined) setLoopStart(data.loopStart);
+        if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
+        if(data.loopEnabled !== undefined) setLoopEnabled(data.loopEnabled);
+        if(data.outputConfig) setOutputConfig(prev => ({...prev, ...data.outputConfig, enabled: false}));
+        if(data.nicConfig) setNicConfig(data.nicConfig);
+        // Custom profiles → merge into runtime + localStorage
+        if(data.customProfiles && typeof data.customProfiles === "object") {
+          Object.entries(data.customProfiles).forEach(([name, prof]) => {
+            DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
+            TYPE_COLORS[name] = prof.color || "#888888";
+          });
+          localStorage.setItem("lumina-custom-profiles", JSON.stringify(data.customProfiles));
+          setCustomProfilesVer(v => v + 1);
+        }
+        // MIDI map → localStorage (FixturePadBar reads from there)
+        if(data.midiMap && typeof data.midiMap === "object") {
+          localStorage.setItem("lumina-midi-map", JSON.stringify(data.midiMap));
+        }
+      } catch(err) { alert("Failed to load show: " + err.message); }
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -713,8 +755,8 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
         <span style={{fontSize:9,color:seqFadeBeats>0?"#e8aa22":"#555",fontFamily:"monospace",width:40,textAlign:"right"}}>{seqFadeBeats>0?seqFadeBeats+"b":"OFF"}</span>
       </div>
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
-        <button onClick={handleSave} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE</button>
-        <button onClick={()=>fileInputRef.current.click()} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>📂 LOAD</button>
+        <button onClick={handleSave} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE SHOW</button>
+        <button onClick={()=>fileInputRef.current.click()} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>📂 LOAD SHOW</button>
         <input ref={fileInputRef} type="file" accept=".lumina,.json" onChange={handleLoad} style={{display:"none"}}/>
       </div>
       <div style={{display:"flex",gap:1,background:"#0c0e12",borderRadius:3,overflow:"hidden"}}>
