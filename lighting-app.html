@@ -70,7 +70,7 @@ const PARAM_GROUPS = [
 const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
-const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc", MEGAPOINTE:"#ff8800", MEGAPOINTE2:"#ff6600" };
+const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc", ROBE_MP:"#ff8800", ROBE_MP2:"#ff6600", MAC_VIPER:"#22ccaa", MAC_VIPER2:"#11aa88" };
 function defaultFixtures() {
   return [
     { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
@@ -92,8 +92,10 @@ const DMX_PROFILES = {
   LED: { channels:8, map:{ dimmer:{offset:0,bits:8}, cyan:{offset:1,bits:8}, magenta:{offset:2,bits:8}, yellow:{offset:3,bits:8}, white:{offset:4,bits:8}, strobe:{offset:5,bits:8}, zoom:{offset:6,bits:8}, colorwheel:{offset:7,bits:8} }},
   FX: { channels:2, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8} }},
   DIM: { channels:1, map:{ dimmer:{offset:0,bits:8} }},
-  MEGAPOINTE: { channels:38, map:{ pan:{offset:0,bits:16}, tilt:{offset:2,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, colorwheel:{offset:9,bits:8}, gobo_a:{offset:19,bits:8}, gobo_a_rot:{offset:20,bits:8}, zoom:{offset:31,bits:8}, focus:{offset:33,bits:8}, strobe:{offset:36,bits:8}, dimmer:{offset:37,bits:8} }},
-  MEGAPOINTE2: { channels:34, map:{ pan:{offset:0,bits:16}, tilt:{offset:2,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, colorwheel:{offset:9,bits:8}, gobo_a:{offset:18,bits:8}, gobo_a_rot:{offset:19,bits:8}, zoom:{offset:29,bits:8}, focus:{offset:30,bits:8}, strobe:{offset:32,bits:8}, dimmer:{offset:33,bits:8} }},
+  ROBE_MP: { channels:38, map:{ pan:{offset:0,bits:16}, tilt:{offset:2,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, colorwheel:{offset:9,bits:8}, gobo_a:{offset:19,bits:8}, gobo_a_rot:{offset:20,bits:8}, zoom:{offset:31,bits:8}, focus:{offset:33,bits:8}, strobe:{offset:36,bits:8}, dimmer:{offset:37,bits:8} }},
+  ROBE_MP2: { channels:34, map:{ pan:{offset:0,bits:16}, tilt:{offset:2,bits:16}, cyan:{offset:6,bits:8}, magenta:{offset:7,bits:8}, yellow:{offset:8,bits:8}, colorwheel:{offset:9,bits:8}, gobo_a:{offset:18,bits:8}, gobo_a_rot:{offset:19,bits:8}, zoom:{offset:29,bits:8}, focus:{offset:30,bits:8}, strobe:{offset:32,bits:8}, dimmer:{offset:33,bits:8} }},
+  MAC_VIPER: { channels:26, map:{ strobe:{offset:0,bits:8}, dimmer:{offset:1,bits:8}, cyan:{offset:2,bits:8}, magenta:{offset:3,bits:8}, yellow:{offset:4,bits:8}, colorwheel:{offset:6,bits:8}, gobo_a:{offset:7,bits:8}, gobo_a_rot:{offset:8,bits:8}, iris:{offset:18,bits:8}, zoom:{offset:19,bits:8}, focus:{offset:20,bits:8}, pan:{offset:21,bits:16}, tilt:{offset:23,bits:16} }},
+  MAC_VIPER2: { channels:34, map:{ strobe:{offset:0,bits:8}, dimmer:{offset:1,bits:16}, cyan:{offset:3,bits:8}, magenta:{offset:4,bits:8}, yellow:{offset:5,bits:8}, colorwheel:{offset:7,bits:8}, gobo_a:{offset:8,bits:8}, gobo_a_rot:{offset:9,bits:8}, iris:{offset:19,bits:8}, zoom:{offset:20,bits:16}, focus:{offset:22,bits:16}, pan:{offset:24,bits:16}, tilt:{offset:26,bits:16} }},
 };
 
 function generateDefaultPatch(fixtures) {
