@@ -97,6 +97,16 @@ const DMX_PROFILES = {
   MAC_VIPER: { channels:26, map:{ strobe:{offset:0,bits:8}, dimmer:{offset:1,bits:8}, cyan:{offset:2,bits:8}, magenta:{offset:3,bits:8}, yellow:{offset:4,bits:8}, colorwheel:{offset:6,bits:8}, gobo_a:{offset:7,bits:8}, gobo_a_rot:{offset:8,bits:8}, iris:{offset:18,bits:8}, zoom:{offset:19,bits:8}, focus:{offset:20,bits:8}, pan:{offset:21,bits:16}, tilt:{offset:23,bits:16} }},
   MAC_VIPER2: { channels:34, map:{ strobe:{offset:0,bits:8}, dimmer:{offset:1,bits:16}, cyan:{offset:3,bits:8}, magenta:{offset:4,bits:8}, yellow:{offset:5,bits:8}, colorwheel:{offset:7,bits:8}, gobo_a:{offset:8,bits:8}, gobo_a_rot:{offset:9,bits:8}, iris:{offset:19,bits:8}, zoom:{offset:20,bits:16}, focus:{offset:22,bits:16}, pan:{offset:24,bits:16}, tilt:{offset:26,bits:16} }},
 };
+// Built-in profile names (cannot be overwritten by custom)
+const BUILTIN_PROFILES = new Set(Object.keys(DMX_PROFILES));
+// Load custom profiles from localStorage
+try {
+  const custom = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}");
+  Object.entries(custom).forEach(([name, prof]) => {
+    DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
+    TYPE_COLORS[name] = prof.color || "#888888";
+  });
+} catch(e) {}
 
 function generateDefaultPatch(fixtures) {
   const patch = {};
@@ -1235,6 +1245,12 @@ function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, b
 function LightingTimeline() {
   const [fixtures, setFixtures] = useState(() => { try { return JSON.parse(localStorage.getItem("lumina-fixtures")) || defaultFixtures(); } catch(e) { return defaultFixtures(); } });
   const [fixtureManagerOpen, setFixtureManagerOpen] = useState(false);
+  const [fixtureBuilderOpen, setFixtureBuilderOpen] = useState(false);
+  const [builderName, setBuilderName] = useState("");
+  const [builderColor, setBuilderColor] = useState("#ff5544");
+  const [builderParams, setBuilderParams] = useState([]);
+  const [builderEditName, setBuilderEditName] = useState(null); // non-null = editing existing
+  const [customProfilesVer, setCustomProfilesVer] = useState(0); // force re-render on save
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -2175,6 +2191,7 @@ function LightingTimeline() {
                   <select value={fx.type} onChange={e=>{const t=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));}} style={{width:100,background:"#080a0e",border:"1px solid #1e222a",color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10}}>
                     {Object.keys(DMX_PROFILES).map(t=><option key={t} value={t}>{t} ({DMX_PROFILES[t].channels}ch)</option>)}
                   </select>
+                  {!BUILTIN_PROFILES.has(fx.type) && <button onClick={()=>{const prof=DMX_PROFILES[fx.type];if(!prof)return;setBuilderEditName(fx.type);setBuilderName(fx.type);setBuilderColor(TYPE_COLORS[fx.type]||"#888888");setBuilderParams(Object.entries(prof.map).map(([pid,{offset,bits}])=>({paramId:pid,offset,bits})));setFixtureBuilderOpen(true);}} style={{width:24,height:22,background:"#0a0a1a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:2,cursor:"pointer",fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",padding:0}} title="Edit custom profile">✎</button>}
                   <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:(fxPatch.universe||1)+'.'+(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:70,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_dmx'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{(fxPatch.universe||1)}.{fxPatch.address||1}</div>
                   <input type="color" value={fx.color} onChange={e=>{const c=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));}} style={{width:28,height:22,border:"1px solid #1e222a",borderRadius:2,background:"none",cursor:"pointer",padding:0}}/>
                   <button onClick={()=>{setFixtures(prev=>prev.filter(f=>f.id!==fx.id));}} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
@@ -2184,6 +2201,7 @@ function LightingTimeline() {
             </div>
             <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
               <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
+              <button onClick={()=>{setBuilderEditName(null);setBuilderName("");setBuilderColor("#ff5544");setBuilderParams([]);setFixtureBuilderOpen(true);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a0a1a",border:"1px solid #ff44ff44",color:"#ff44ff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>⚡ BUILD TYPE</button>
               <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
             </div>
             {keypadState && keypadState.field==='fixture_dmx' && (() => {
@@ -2237,6 +2255,111 @@ function LightingTimeline() {
           </div>
         </div>
       )}
+
+      {/* Fixture Builder Modal */}
+      {fixtureBuilderOpen && (() => {
+        const totalCh = builderParams.length === 0 ? 0 : Math.max(...builderParams.map(p => p.offset + (p.bits === 16 ? 2 : 1)));
+        const nextOffset = builderParams.length === 0 ? 0 : Math.max(...builderParams.map(p => p.offset + (p.bits === 16 ? 2 : 1)));
+        const usedParams = new Set(builderParams.map(p => p.paramId));
+        const availableParams = ALL_PARAMS.filter(p => !usedParams.has(p.id));
+        const saveProfile = () => {
+          const name = builderName.trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+          if (!name) return alert("Name required");
+          if (builderParams.length === 0) return alert("Add at least one parameter");
+          if (BUILTIN_PROFILES.has(name) && builderEditName !== name) return alert("Cannot overwrite built-in profile: " + name);
+          const map = {};
+          builderParams.forEach(p => { map[p.paramId] = { offset: p.offset, bits: p.bits }; });
+          const prof = { channels: totalCh, map, color: builderColor };
+          // Update runtime
+          DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
+          TYPE_COLORS[name] = prof.color;
+          // Save to localStorage
+          let custom = {};
+          try { custom = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
+          // If renaming, delete old key
+          if (builderEditName && builderEditName !== name) {
+            delete custom[builderEditName];
+            delete DMX_PROFILES[builderEditName];
+            delete TYPE_COLORS[builderEditName];
+            // Update any fixtures using old name
+            setFixtures(prev => prev.map(f => f.type === builderEditName ? {...f, type: name, color: builderColor} : f));
+          }
+          custom[name] = prof;
+          localStorage.setItem("lumina-custom-profiles", JSON.stringify(custom));
+          setCustomProfilesVer(v => v + 1);
+          setFixtureBuilderOpen(false);
+        };
+        const deleteProfile = () => {
+          if (!builderEditName || BUILTIN_PROFILES.has(builderEditName)) return;
+          delete DMX_PROFILES[builderEditName];
+          delete TYPE_COLORS[builderEditName];
+          let custom = {};
+          try { custom = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
+          delete custom[builderEditName];
+          localStorage.setItem("lumina-custom-profiles", JSON.stringify(custom));
+          // Reset any fixtures using this type to SPOT
+          setFixtures(prev => prev.map(f => f.type === builderEditName ? {...f, type: "SPOT", color: TYPE_COLORS.SPOT} : f));
+          setCustomProfilesVer(v => v + 1);
+          setFixtureBuilderOpen(false);
+        };
+        return (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:10002,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureBuilderOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #ff44ff44",borderRadius:8,width:520,maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#ff44ff",letterSpacing:2}}>⚡ {builderEditName ? "EDIT" : "BUILD"} FIXTURE TYPE</span>
+              <span style={{flex:1}}/>
+              <span style={{fontSize:10,color:"#888",marginRight:8}}>TOTAL: {totalCh}ch</span>
+              <button onClick={()=>setFixtureBuilderOpen(false)} style={{background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",fontSize:12,width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+            {/* Name & Color */}
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 16px",borderBottom:"1px solid #1a1d22"}}>
+              <span style={{fontSize:9,color:"#888",letterSpacing:1}}>NAME</span>
+              <input type="text" value={builderName} onChange={e=>setBuilderName(e.target.value.toUpperCase().replace(/\s+/g,'_'))} placeholder="MY_FIXTURE" style={{flex:1,background:"#080a0e",border:"1px solid #ff44ff44",color:"#ff44ff",borderRadius:3,padding:"5px 8px",fontSize:12,fontWeight:"bold",letterSpacing:1,fontFamily:"monospace"}}/>
+              <span style={{fontSize:9,color:"#888",letterSpacing:1}}>COLOR</span>
+              <input type="color" value={builderColor} onChange={e=>setBuilderColor(e.target.value)} style={{width:32,height:26,border:"1px solid #1e222a",borderRadius:3,background:"none",cursor:"pointer",padding:0}}/>
+            </div>
+            {/* Parameter list header */}
+            <div style={{display:"flex",padding:"6px 16px",gap:4,borderBottom:"1px solid #1a1d22",fontSize:8,color:"#555",letterSpacing:1}}>
+              <span style={{width:120}}>PARAMETER</span>
+              <span style={{width:60,textAlign:"center"}}>DMX CH</span>
+              <span style={{width:50,textAlign:"center"}}>BITS</span>
+              <span style={{flex:1}}/>
+              <span style={{width:28}}/>
+            </div>
+            {/* Parameter rows */}
+            <div style={{flex:1,overflowY:"auto",padding:"4px 16px 8px",minHeight:60,maxHeight:300}}>
+              {builderParams.map((bp, idx) => {
+                const pDef = getParam(bp.paramId);
+                return (
+                <div key={bp.paramId} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 0",borderTop:idx>0?"1px solid #1a1d22":"none"}}>
+                  <span style={{width:120,fontSize:10,color:pDef?.color||"#aaa",fontWeight:"bold"}}>{pDef?.label||bp.paramId}</span>
+                  <input type="number" value={bp.offset+1} min={1} max={512} onChange={e=>{const v=Math.max(0,Math.min(511,parseInt(e.target.value)||1)-1);setBuilderParams(prev=>prev.map((p,i)=>i===idx?{...p,offset:v}:p));}} style={{width:60,background:"#080a0e",border:"1px solid #ff44ff33",color:"#ff44ff",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",fontFamily:"monospace"}}/>
+                  <button onClick={()=>setBuilderParams(prev=>prev.map((p,i)=>i===idx?{...p,bits:p.bits===8?16:8}:p))} style={{width:50,padding:"3px 0",fontSize:10,fontWeight:"bold",background:bp.bits===16?"#1a0a2a":"#0a0a1a",border:"1px solid "+(bp.bits===16?"#aa44ff44":"#44444444"),color:bp.bits===16?"#aa44ff":"#666",borderRadius:2,cursor:"pointer"}}>{bp.bits}bit</button>
+                  <span style={{flex:1}}/>
+                  <button onClick={()=>setBuilderParams(prev=>prev.filter((_,i)=>i!==idx))} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                </div>
+                );
+              })}
+              {builderParams.length === 0 && <div style={{padding:16,textAlign:"center",fontSize:10,color:"#555"}}>No parameters yet — add one below</div>}
+            </div>
+            {/* Add parameter dropdown */}
+            <div style={{padding:"6px 16px",borderTop:"1px solid #1a1d22"}}>
+              <select key={"pa"+builderParams.length} defaultValue="" onChange={e=>{if(!e.target.value)return;const pid=e.target.value;setBuilderParams(prev=>{const no=prev.length===0?0:Math.max(...prev.map(p=>p.offset+(p.bits===16?2:1)));return[...prev,{paramId:pid,offset:no,bits:8}];});}} style={{width:"100%",background:"#080a0e",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,padding:"5px 8px",fontSize:10,cursor:"pointer"}}>
+                <option value="">+ ADD PARAMETER...</option>
+                {availableParams.map(p=><option key={p.id} value={p.id}>{p.label} ({p.id})</option>)}
+              </select>
+            </div>
+            {/* Footer buttons */}
+            <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
+              {builderEditName && !BUILTIN_PROFILES.has(builderEditName) && <button onClick={deleteProfile} style={{padding:"6px 12px",fontSize:10,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>DELETE</button>}
+              <span style={{flex:1}}/>
+              <button onClick={()=>setFixtureBuilderOpen(false)} style={{padding:"6px 16px",fontSize:10,background:"#1a1a1a",border:"1px solid #33333344",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CANCEL</button>
+              <button onClick={saveProfile} style={{padding:"6px 16px",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>💾 SAVE</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* DMX Patch Modal */}
       {dmxPatchModalOpen && (
