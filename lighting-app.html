@@ -2169,49 +2169,80 @@ function LightingTimeline() {
                 const p = dmxPatch[fx.id] || {universe:1,address:1,profile:fx.type,overrides:{}};
                 const profile = DMX_PROFILES[p.profile] || DMX_PROFILES.SPOT;
                 const params = Object.entries(profile.map);
-                return params.map(([paramId, profEntry], pIdx) => {
-                  const ov = p.overrides?.[paramId] || { universe: p.universe, channel: p.address + profEntry.offset, bits: profEntry.bits };
+                const fxUni = p.universe || 1;
+                const fxAddr = p.address || 1;
+                return [
+                  <div key={`${fx.id}-addr`} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0 2px",borderTop:fxIdx>0?"1px solid #2a2e36":"none",marginTop:fxIdx>0?6:0,background:"#12151c",margin:"0 -4px",padding:"5px 4px 3px",borderRadius:3}}>
+                    <div style={{width:20}}/>
+                    <div style={{width:80,display:"flex",alignItems:"center",gap:4}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:fx.color,flexShrink:0}}/>
+                      <span style={{fontSize:10,color:fx.color,fontWeight:"bold",overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
+                    </div>
+                    <span style={{fontSize:9,color:"#ff884488",letterSpacing:1,width:80}}>ADDRESS</span>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_universe',value:String(fxUni),rect:{top:r.bottom+2,left:r.left}});}} style={{width:36,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxUni}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:0}}>
+                      <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_address',value:String(fxAddr),rect:{top:r.bottom+2,left:r.left}});}} style={{width:44,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxAddr}</div>
+                    </div>
+                    <span style={{fontSize:8,color:"#555"}}>{profile.channels}ch</span>
+                    <span style={{fontSize:8,color:fxAddr+profile.channels-1>512?"#ff3333":"#333",marginLeft:2}}>{fxAddr+profile.channels-1>512?"OVERFLOW":""}</span>
+                  </div>,
+                  ...params.map(([paramId, profEntry], pIdx) => {
+                  const ov = p.overrides?.[paramId] || { universe: fxUni, channel: fxAddr + profEntry.offset, bits: profEntry.bits };
                   const bypassed = !!ov.bypass;
                   const paramDef = getParam(paramId);
                   const liveKey = `${fx.id}-${paramId}`;
                   const liveVal = liveValues[liveKey];
-                  const isFirst = pIdx === 0;
                   const toggleBypass = () => { setDmxPatch(prev=>{const fp={...prev[fx.id]};const ovs={...(fp.overrides||{})};ovs[paramId]={...ov,bypass:!bypassed};return{...prev,[fx.id]:{...fp,overrides:ovs}};}); };
                   return (
-                    <div key={`${fx.id}-${paramId}`} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 0",borderTop:isFirst&&fxIdx>0?"1px solid #1e222a":"none",marginTop:isFirst&&fxIdx>0?4:0,opacity:bypassed?0.3:1}}>
+                    <div key={`${fx.id}-${paramId}`} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 0",opacity:bypassed?0.3:1}}>
                       <div style={{width:20,display:"flex",justifyContent:"center"}}>
                         <div onClick={toggleBypass} style={{width:12,height:12,borderRadius:2,border:"1px solid "+(bypassed?"#333":"#22cc55"),background:bypassed?"#0c0e12":"#22cc5522",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:bypassed?"#333":"#22cc55"}}>{bypassed?"":"✓"}</div>
                       </div>
-                      {isFirst ? (
-                        <div style={{width:80,display:"flex",alignItems:"center",gap:4}}>
-                          <div style={{width:6,height:6,borderRadius:"50%",background:fx.color,flexShrink:0}}/>
-                          <span style={{fontSize:9,color:fx.color,fontWeight:"bold",overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
-                        </div>
-                      ) : <div style={{width:80}}/>}
+                      <div style={{width:80}}/>
                       <span style={{width:80,fontSize:9,color:bypassed?"#333":(paramDef?.color||"#888"),textDecoration:bypassed?"line-through":"none"}}>{paramDef?.label||paramId}</span>
-                      <div onClick={e=>{if(bypassed)return;const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId,field:'universe',value:String(ov.universe),rect:{top:r.bottom+2,left:r.left}});}} style={{width:36,background:"#080a0e",border:"1px solid "+(bypassed?"#111":(keypadState?.fxId===fx.id&&keypadState?.paramId===paramId&&keypadState?.field==='universe'?"#ff8844":"#1e222a")),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center",cursor:bypassed?"default":"pointer",userSelect:"none"}}>{ov.universe}</div>
-                      <div onClick={e=>{if(bypassed)return;const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId,field:'channel',value:String(ov.channel),rect:{top:r.bottom+2,left:r.left}});}} style={{width:44,background:"#080a0e",border:"1px solid "+(bypassed?"#111":(keypadState?.fxId===fx.id&&keypadState?.paramId===paramId&&keypadState?.field==='channel'?"#ff8844":"#1e222a")),color:bypassed?"#333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:10,textAlign:"center",cursor:bypassed?"default":"pointer",userSelect:"none"}}>{ov.channel}</div>
+                      <div style={{width:36,color:bypassed?"#333":"#ff884466",borderRadius:2,padding:"2px 4px",fontSize:9,textAlign:"center",userSelect:"none"}}>{ov.universe}</div>
+                      <div style={{width:44,color:bypassed?"#333":"#ff884466",borderRadius:2,padding:"2px 4px",fontSize:9,textAlign:"center",userSelect:"none"}}>{ov.channel}</div>
                       <span style={{width:28,textAlign:"center",fontSize:8,color:bypassed?"#222":(ov.bits===16?"#4488ff":"#555")}}>{ov.bits}b</span>
                       <span style={{width:50,textAlign:"right",fontSize:9,color:bypassed?"#222":(liveVal!==undefined?"#22cc55":"#333"),fontFamily:"monospace"}}>{bypassed?"OFF":(liveVal!==undefined?`${Math.round(liveVal)}${paramDef?.unit||""}`:"—")}</span>
                     </div>
                   );
-                });
+                })
+                ];
               })}
             </div>
             {/* Numeric Keypad Popup */}
             {keypadState && (() => {
-              const isUni = keypadState.field === 'universe';
+              const isFixtureUni = keypadState.field === 'fixture_universe';
+              const isFixtureAddr = keypadState.field === 'fixture_address';
+              const isFixtureLevel = isFixtureUni || isFixtureAddr;
+              const isUni = keypadState.field === 'universe' || isFixtureUni;
               const max = isUni ? 64 : 512;
-              const label = isUni ? 'UNIVERSE' : 'CHANNEL';
+              const label = isFixtureUni ? 'UNIVERSE' : isFixtureAddr ? 'ADDRESS' : isUni ? 'UNIVERSE' : 'CHANNEL';
               const applyValue = (val) => {
                 const v = Math.max(1, Math.min(max, parseInt(val) || 1));
-                setDmxPatch(prev => {
-                  const fp = {...prev[keypadState.fxId]};
-                  const ovs = {...(fp.overrides || {})};
-                  const existing = ovs[keypadState.paramId] || {};
-                  ovs[keypadState.paramId] = {...existing, [isUni ? 'universe' : 'channel']: v};
-                  return {...prev, [keypadState.fxId]: {...fp, overrides: ovs}};
-                });
+                if (isFixtureLevel) {
+                  setDmxPatch(prev => {
+                    const fp = {...prev[keypadState.fxId]};
+                    const fxType = fp.profile || 'SPOT';
+                    const profDef = DMX_PROFILES[fxType] || DMX_PROFILES.SPOT;
+                    const newUni = isFixtureUni ? v : (fp.universe || 1);
+                    const newAddr = isFixtureAddr ? v : (fp.address || 1);
+                    const ovs = {};
+                    Object.entries(profDef.map).forEach(([paramId, {offset, bits}]) => {
+                      const prev_ov = fp.overrides?.[paramId] || {};
+                      ovs[paramId] = { ...prev_ov, universe: newUni, channel: newAddr + offset, bits };
+                    });
+                    return {...prev, [keypadState.fxId]: {...fp, universe: newUni, address: newAddr, overrides: ovs}};
+                  });
+                } else {
+                  setDmxPatch(prev => {
+                    const fp = {...prev[keypadState.fxId]};
+                    const ovs = {...(fp.overrides || {})};
+                    const existing = ovs[keypadState.paramId] || {};
+                    ovs[keypadState.paramId] = {...existing, [isUni ? 'universe' : 'channel']: v};
+                    return {...prev, [keypadState.fxId]: {...fp, overrides: ovs}};
+                  });
+                }
                 setKeypadState(null);
               };
               const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
