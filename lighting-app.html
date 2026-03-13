@@ -612,7 +612,11 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
 
+  const [showName, setShowName] = useState("my-show");
   const handleSave = () => {
+    const name = prompt("Show name:", showName);
+    if(!name) return;
+    setShowName(name);
     // Read midiMap and customProfiles from localStorage (they live in child component / global scope)
     let midiMapData = {};
     try { midiMapData = JSON.parse(localStorage.getItem("lumina-midi-map") || "{}"); } catch(e) {}
@@ -621,6 +625,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
     const data = {
       type: "lumina-project",
       version: 3,
+      showName: name,
       savedAt: new Date().toISOString(),
       // Show data
       fixtures,
@@ -644,7 +649,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "lumina-" + new Date().toISOString().slice(0,19).replace(/[:.]/g,"-") + ".lumina";
+    a.download = name.replace(/[^a-zA-Z0-9_\-]/g, "_") + ".lumina";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -667,6 +672,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
         if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
         if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
         // Config (v3+)
+        if(data.showName) setShowName(data.showName);
         if(data.bpm !== undefined) setBpm(data.bpm);
         if(data.loopStart !== undefined) setLoopStart(data.loopStart);
         if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
