@@ -70,7 +70,7 @@ const PARAM_GROUPS = [
 const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
-const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc" };
+const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc", MEGAPOINTE:"#ff8800" };
 function defaultFixtures() {
   return [
     { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
@@ -92,6 +92,7 @@ const DMX_PROFILES = {
   LED: { channels:8, map:{ dimmer:{offset:0,bits:8}, cyan:{offset:1,bits:8}, magenta:{offset:2,bits:8}, yellow:{offset:3,bits:8}, white:{offset:4,bits:8}, strobe:{offset:5,bits:8}, zoom:{offset:6,bits:8}, colorwheel:{offset:7,bits:8} }},
   FX: { channels:2, map:{ dimmer:{offset:0,bits:8}, strobe:{offset:1,bits:8} }},
   DIM: { channels:1, map:{ dimmer:{offset:0,bits:8} }},
+  MEGAPOINTE: { channels:27, map:{ pan:{offset:0,bits:16}, tilt:{offset:2,bits:16}, colorwheel:{offset:6,bits:8}, cyan:{offset:7,bits:8}, magenta:{offset:8,bits:8}, yellow:{offset:9,bits:8}, gobo_a:{offset:13,bits:8}, gobo_a_rot:{offset:14,bits:8}, focus:{offset:20,bits:8}, zoom:{offset:21,bits:8}, iris:{offset:23,bits:8}, strobe:{offset:24,bits:8}, dimmer:{offset:25,bits:16} }},
 };
 
 function generateDefaultPatch(fixtures) {
