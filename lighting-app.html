@@ -2106,7 +2106,7 @@ function LightingTimeline() {
       {/* Fixture Manager Modal */}
       {fixtureManagerOpen && (
         <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureManagerOpen(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #44aaff44",borderRadius:8,width:560,maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #44aaff44",borderRadius:8,width:660,maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
             <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
               <span style={{fontSize:12,fontWeight:"bold",color:"#44aaff",letterSpacing:2}}>FIXTURES</span>
               <span style={{marginLeft:8,fontSize:9,color:"#555"}}>COUNT</span>
@@ -2120,21 +2120,28 @@ function LightingTimeline() {
               <span style={{width:28,textAlign:"center"}}>#</span>
               <span style={{flex:1}}>NAME</span>
               <span style={{width:100}}>TYPE</span>
+              <span style={{width:36,textAlign:"center"}}>UNI</span>
+              <span style={{width:48,textAlign:"center"}}>ADDR</span>
               <span style={{width:36,textAlign:"center"}}>COLOR</span>
-              <span style={{width:36}}/>
+              <span style={{width:28}}/>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"4px 16px 12px"}}>
-              {fixtures.map((fx,idx) => (
+              {fixtures.map((fx,idx) => {
+                const fxPatch = dmxPatch[fx.id] || {universe:1,address:1,profile:fx.type,overrides:{}};
+                return (
                 <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderTop:idx>0?"1px solid #1a1d22":"none"}}>
                   <span style={{width:28,textAlign:"center",fontSize:10,color:"#555"}}>{fx.id}</span>
                   <input type="text" value={fx.name} onChange={e=>{const v=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,name:v}:f));}} style={{flex:1,background:"#080a0e",border:"1px solid #1e222a",color:"#ddd",borderRadius:2,padding:"3px 6px",fontSize:10}}/>
                   <select value={fx.type} onChange={e=>{const t=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));}} style={{width:100,background:"#080a0e",border:"1px solid #1e222a",color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10}}>
                     {Object.keys(DMX_PROFILES).map(t=><option key={t} value={t}>{t} ({DMX_PROFILES[t].channels}ch)</option>)}
                   </select>
+                  <input type="number" min={1} max={64} value={fxPatch.universe||1} onChange={e=>{const v=Math.max(1,Math.min(64,+e.target.value||1));setDmxPatch(prev=>{const fp={...prev[fx.id]||{universe:1,address:1,profile:fx.type,overrides:{}}};const profDef=DMX_PROFILES[fp.profile||fx.type]||DMX_PROFILES.SPOT;const addr=fp.address||1;const ovs={};Object.entries(profDef.map).forEach(([pid,{offset,bits}])=>{const prev_ov=fp.overrides?.[pid]||{};ovs[pid]={...prev_ov,universe:v,channel:addr+offset,bits};});return{...prev,[fx.id]:{...fp,universe:v,overrides:ovs}};});}} style={{width:36,background:"#080a0e",border:"1px solid #ff884444",color:"#ff8844",borderRadius:2,padding:"3px 2px",fontSize:10,textAlign:"center"}}/>
+                  <input type="number" min={1} max={512} value={fxPatch.address||1} onChange={e=>{const v=Math.max(1,Math.min(512,+e.target.value||1));setDmxPatch(prev=>{const fp={...prev[fx.id]||{universe:1,address:1,profile:fx.type,overrides:{}}};const profDef=DMX_PROFILES[fp.profile||fx.type]||DMX_PROFILES.SPOT;const uni=fp.universe||1;const ovs={};Object.entries(profDef.map).forEach(([pid,{offset,bits}])=>{const prev_ov=fp.overrides?.[pid]||{};ovs[pid]={...prev_ov,universe:uni,channel:v+offset,bits};});return{...prev,[fx.id]:{...fp,address:v,overrides:ovs}};});}} style={{width:48,background:"#080a0e",border:"1px solid #ff884444",color:"#ff8844",borderRadius:2,padding:"3px 2px",fontSize:10,textAlign:"center"}}/>
                   <input type="color" value={fx.color} onChange={e=>{const c=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));}} style={{width:28,height:22,border:"1px solid #1e222a",borderRadius:2,background:"none",cursor:"pointer",padding:0}}/>
                   <button onClick={()=>{setFixtures(prev=>prev.filter(f=>f.id!==fx.id));}} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
               <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
