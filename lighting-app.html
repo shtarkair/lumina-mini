@@ -2120,8 +2120,7 @@ function LightingTimeline() {
               <span style={{width:28,textAlign:"center"}}>#</span>
               <span style={{flex:1}}>NAME</span>
               <span style={{width:100}}>TYPE</span>
-              <span style={{width:36,textAlign:"center"}}>UNI</span>
-              <span style={{width:48,textAlign:"center"}}>ADDR</span>
+              <span style={{width:70,textAlign:"center"}}>DMX ADDR</span>
               <span style={{width:36,textAlign:"center"}}>COLOR</span>
               <span style={{width:28}}/>
             </div>
@@ -2135,8 +2134,7 @@ function LightingTimeline() {
                   <select value={fx.type} onChange={e=>{const t=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));}} style={{width:100,background:"#080a0e",border:"1px solid #1e222a",color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10}}>
                     {Object.keys(DMX_PROFILES).map(t=><option key={t} value={t}>{t} ({DMX_PROFILES[t].channels}ch)</option>)}
                   </select>
-                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_universe',value:String(fxPatch.universe||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:36,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_universe'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 2px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxPatch.universe||1}</div>
-                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_address',value:String(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:48,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_address'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 2px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxPatch.address||1}</div>
+                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:(fxPatch.universe||1)+'.'+(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:70,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_dmx'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{(fxPatch.universe||1)}.{fxPatch.address||1}</div>
                   <input type="color" value={fx.color} onChange={e=>{const c=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));}} style={{width:28,height:22,border:"1px solid #1e222a",borderRadius:2,background:"none",cursor:"pointer",padding:0}}/>
                   <button onClick={()=>{setFixtures(prev=>prev.filter(f=>f.id!==fx.id));}} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                 </div>
@@ -2147,17 +2145,14 @@ function LightingTimeline() {
               <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
               <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
             </div>
-            {keypadState && (keypadState.field==='fixture_universe'||keypadState.field==='fixture_address') && (() => {
-              const isUni = keypadState.field === 'fixture_universe';
-              const max = isUni ? 64 : 512;
-              const label = isUni ? 'UNIVERSE' : 'ADDRESS';
-              const applyKp = (val) => {
-                const v = Math.max(1, Math.min(max, parseInt(val) || 1));
+            {keypadState && keypadState.field==='fixture_dmx' && (() => {
+              const applyDmx = (val) => {
+                const parts = val.split('.');
+                const newUni = Math.max(1, Math.min(64, parseInt(parts[0]) || 1));
+                const newAddr = parts.length > 1 ? Math.max(1, Math.min(512, parseInt(parts[1]) || 1)) : 1;
                 setDmxPatch(prev => {
                   const fp = {...prev[keypadState.fxId]||{universe:1,address:1,profile:'SPOT',overrides:{}}};
                   const profDef = DMX_PROFILES[fp.profile] || DMX_PROFILES.SPOT;
-                  const newUni = isUni ? v : (fp.universe || 1);
-                  const newAddr = isUni ? (fp.address || 1) : v;
                   const ovs = {};
                   Object.entries(profDef.map).forEach(([pid, {offset, bits}]) => {
                     const prev_ov = fp.overrides?.[pid] || {};
@@ -2168,25 +2163,32 @@ function LightingTimeline() {
                 setKeypadState(null);
               };
               const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+              const kpDot = () => setKeypadState(prev => {
+                const v = prev.dirty ? prev.value : '';
+                if (v.includes('.')) return prev;
+                return {...prev, value: v + '.', dirty: true};
+              });
               const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
               const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
               return (
                 <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-220),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-240),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
-                      <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>{label}</span>
-                      <span style={{fontSize:8,color:"#555"}}>1–{max}</span>
+                      <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>UNI . ADDRESS</span>
                     </div>
                     <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:keypadState.dirty?"#ff8844":"#ff884466",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
                       {[1,2,3,4,5,6,7,8,9].map(d => (
                         <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
                       ))}
-                      <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                      <button onClick={kpDot} style={{padding:"8px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #ff884444",color:"#ff8844",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>.</button>
                       <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
                       <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
                     </div>
-                    <button onClick={()=>{if(keypadState.dirty){applyKp(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2,marginTop:2}}>ENTER</button>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+                      <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                      <button onClick={()=>{if(keypadState.dirty){applyDmx(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2230,10 +2232,7 @@ function LightingTimeline() {
                       <span style={{fontSize:10,color:fx.color,fontWeight:"bold",overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
                     </div>
                     <span style={{fontSize:9,color:"#ff884488",letterSpacing:1,width:80}}>ADDRESS</span>
-                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_universe',value:String(fxUni),rect:{top:r.bottom+2,left:r.left}});}} style={{width:36,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxUni}</div>
-                    <div style={{display:"flex",alignItems:"center",gap:0}}>
-                      <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_address',value:String(fxAddr),rect:{top:r.bottom+2,left:r.left}});}} style={{width:44,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxAddr}</div>
-                    </div>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:fxUni+'.'+fxAddr,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxUni}.{fxAddr}</div>
                     <span style={{fontSize:8,color:"#555"}}>{profile.channels}ch</span>
                     <span style={{fontSize:8,color:fxAddr+profile.channels-1>512?"#ff3333":"#333",marginLeft:2}}>{fxAddr+profile.channels-1>512?"OVERFLOW":""}</span>
                   </div>,
@@ -2263,21 +2262,17 @@ function LightingTimeline() {
             </div>
             {/* Numeric Keypad Popup */}
             {keypadState && (() => {
-              const isFixtureUni = keypadState.field === 'fixture_universe';
-              const isFixtureAddr = keypadState.field === 'fixture_address';
-              const isFixtureLevel = isFixtureUni || isFixtureAddr;
-              const isUni = keypadState.field === 'universe' || isFixtureUni;
-              const max = isUni ? 64 : 512;
-              const label = isFixtureUni ? 'UNIVERSE' : isFixtureAddr ? 'ADDRESS' : isUni ? 'UNIVERSE' : 'CHANNEL';
+              const isDmx = keypadState.field === 'fixture_dmx';
+              const isCh = keypadState.field === 'channel';
+              const label = isDmx ? 'UNI . ADDRESS' : 'CHANNEL';
               const applyValue = (val) => {
-                const v = Math.max(1, Math.min(max, parseInt(val) || 1));
-                if (isFixtureLevel) {
+                if (isDmx) {
+                  const parts = val.split('.');
+                  const newUni = Math.max(1, Math.min(64, parseInt(parts[0]) || 1));
+                  const newAddr = parts.length > 1 ? Math.max(1, Math.min(512, parseInt(parts[1]) || 1)) : 1;
                   setDmxPatch(prev => {
                     const fp = {...prev[keypadState.fxId]};
-                    const fxType = fp.profile || 'SPOT';
-                    const profDef = DMX_PROFILES[fxType] || DMX_PROFILES.SPOT;
-                    const newUni = isFixtureUni ? v : (fp.universe || 1);
-                    const newAddr = isFixtureAddr ? v : (fp.address || 1);
+                    const profDef = DMX_PROFILES[fp.profile||'SPOT'] || DMX_PROFILES.SPOT;
                     const ovs = {};
                     Object.entries(profDef.map).forEach(([paramId, {offset, bits}]) => {
                       const prev_ov = fp.overrides?.[paramId] || {};
@@ -2286,36 +2281,46 @@ function LightingTimeline() {
                     return {...prev, [keypadState.fxId]: {...fp, universe: newUni, address: newAddr, overrides: ovs}};
                   });
                 } else {
+                  const v = Math.max(1, Math.min(512, parseInt(val) || 1));
                   setDmxPatch(prev => {
                     const fp = {...prev[keypadState.fxId]};
                     const ovs = {...(fp.overrides || {})};
                     const existing = ovs[keypadState.paramId] || {};
-                    ovs[keypadState.paramId] = {...existing, [isUni ? 'universe' : 'channel']: v};
+                    ovs[keypadState.paramId] = {...existing, channel: v};
                     return {...prev, [keypadState.fxId]: {...fp, overrides: ovs}};
                   });
                 }
                 setKeypadState(null);
               };
               const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+              const kpDot = () => setKeypadState(prev => {
+                const v = prev.dirty ? prev.value : '';
+                if (v.includes('.')) return prev;
+                return {...prev, value: v + '.', dirty: true};
+              });
               const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
               const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
               return (
                 <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-220),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-240),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
                       <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>{label}</span>
-                      <span style={{fontSize:8,color:"#555"}}>1–{max}</span>
+                      {isCh && <span style={{fontSize:8,color:"#555"}}>1–512</span>}
                     </div>
                     <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:keypadState.dirty?"#ff8844":"#ff884466",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
                       {[1,2,3,4,5,6,7,8,9].map(d => (
                         <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
                       ))}
-                      <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                      {isDmx ? <button onClick={kpDot} style={{padding:"8px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #ff884444",color:"#ff8844",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>.</button>
+                      : <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>}
                       <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
                       <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
                     </div>
-                    <button onClick={()=>{if(keypadState.dirty){applyValue(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2,marginTop:2}}>ENTER</button>
+                    <div style={{display:"grid",gridTemplateColumns:isDmx?"1fr 1fr":"1fr",gap:3}}>
+                      {isDmx && <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>}
+                      <button onClick={()=>{if(keypadState.dirty){applyValue(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                    </div>
                   </div>
                 </div>
               );
