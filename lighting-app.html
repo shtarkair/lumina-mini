@@ -607,92 +607,35 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead }) {
+function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
 
-  const [showName, setShowName] = useState("my-show");
-  const handleSave = () => {
-    const name = prompt("Show name:", showName);
-    if(!name) return;
-    setShowName(name);
-    // Read midiMap and customProfiles from localStorage (they live in child component / global scope)
-    let midiMapData = {};
-    try { midiMapData = JSON.parse(localStorage.getItem("lumina-midi-map") || "{}"); } catch(e) {}
-    let customProfilesData = {};
-    try { customProfilesData = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
-    const data = {
-      type: "lumina-project",
-      version: 3,
-      showName: name,
-      savedAt: new Date().toISOString(),
-      // Show data
-      fixtures,
-      cues,
-      dmxPatch,
-      sequenceStorage,
-      mutedLanes: [...mutedLanes],
-      // Config
-      bpm,
-      loopStart,
-      loopEnd,
-      loopEnabled,
-      outputConfig,
-      nicConfig,
-      // External state (from localStorage)
-      midiMap: midiMapData,
-      customProfiles: customProfilesData,
-    };
+  // Seq-only save/load (v2 format)
+  const handleSaveSeq = () => {
+    const data = { type:"lumina-project", version:2, savedAt:new Date().toISOString(), fixtures, cues, sequenceStorage, mutedLanes:[...mutedLanes] };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = name.replace(/[^a-zA-Z0-9_\-]/g, "_") + ".lumina";
+    a.download = "lumina-seq-" + new Date().toISOString().slice(0,19).replace(/[:.]/g,"-") + ".lumina";
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  const handleLoad = (e) => {
+  const handleLoadSeq = (e) => {
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
-        // Fixtures + patch
-        if(data.fixtures) setFixtures(data.fixtures);
-        if(data.dmxPatch) setDmxPatch(data.dmxPatch);
-        else if(data.fixtures) setDmxPatch(generateDefaultPatch(data.fixtures));
-        // Cues
+        if(data.type !== "lumina-project") { alert("Not a valid LUMINA file"); return; }
         if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
-        // Sequences
         if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
         if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
-        // Config (v3+)
-        if(data.showName) setShowName(data.showName);
-        if(data.bpm !== undefined) setBpm(data.bpm);
-        if(data.loopStart !== undefined) setLoopStart(data.loopStart);
-        if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
-        if(data.loopEnabled !== undefined) setLoopEnabled(data.loopEnabled);
-        if(data.outputConfig) setOutputConfig(prev => ({...prev, ...data.outputConfig, enabled: false}));
-        if(data.nicConfig) setNicConfig(data.nicConfig);
-        // Custom profiles → merge into runtime + localStorage
-        if(data.customProfiles && typeof data.customProfiles === "object") {
-          Object.entries(data.customProfiles).forEach(([name, prof]) => {
-            DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
-            TYPE_COLORS[name] = prof.color || "#888888";
-          });
-          localStorage.setItem("lumina-custom-profiles", JSON.stringify(data.customProfiles));
-          setCustomProfilesVer(v => v + 1);
-        }
-        // MIDI map → localStorage (FixturePadBar reads from there)
-        if(data.midiMap && typeof data.midiMap === "object") {
-          localStorage.setItem("lumina-midi-map", JSON.stringify(data.midiMap));
-        }
-      } catch(err) { alert("Failed to load show: " + err.message); }
+      } catch(err) { alert("Failed to load: " + err.message); }
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -761,9 +704,9 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
         <span style={{fontSize:9,color:seqFadeBeats>0?"#e8aa22":"#555",fontFamily:"monospace",width:40,textAlign:"right"}}>{seqFadeBeats>0?seqFadeBeats+"b":"OFF"}</span>
       </div>
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
-        <button onClick={handleSave} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE SHOW</button>
-        <button onClick={()=>fileInputRef.current.click()} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>📂 LOAD SHOW</button>
-        <input ref={fileInputRef} type="file" accept=".lumina,.json" onChange={handleLoad} style={{display:"none"}}/>
+        <button onClick={handleSaveSeq} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>💾 SAVE</button>
+        <button onClick={()=>fileInputRef.current.click()} style={{flex:1,padding:"5px 0",fontSize:8,letterSpacing:1,background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:3,cursor:"pointer",fontWeight:"bold"}}>📂 LOAD</button>
+        <input ref={fileInputRef} type="file" accept=".lumina,.json" onChange={handleLoadSeq} style={{display:"none"}}/>
       </div>
       <div style={{display:"flex",gap:1,background:"#0c0e12",borderRadius:3,overflow:"hidden"}}>
         {SEQ_CATS.map(c=>(
@@ -1440,6 +1383,72 @@ function LightingTimeline() {
   const [keypadState, setKeypadState] = useState(null); // { fxId, paramId, field:'universe'|'channel', value:'', rect:{top,left} }
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
 
+  // ─── Show-level save / load ───
+  const [showName, setShowName] = useState("my-show");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveDialogName, setSaveDialogName] = useState("");
+  const showFileInputRef = useRef(null);
+  const doSaveShow = (name) => {
+    setShowName(name);
+    let midiMapData = {};
+    try { midiMapData = JSON.parse(localStorage.getItem("lumina-midi-map") || "{}"); } catch(e) {}
+    let customProfilesData = {};
+    try { customProfilesData = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
+    const data = {
+      type: "lumina-project", version: 3, showName: name, savedAt: new Date().toISOString(),
+      fixtures, cues, dmxPatch, sequenceStorage, mutedLanes: [...mutedLanes],
+      bpm, loopStart, loopEnd, loopEnabled, outputConfig, nicConfig,
+      midiMap: midiMapData, customProfiles: customProfilesData,
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name.replace(/[^a-zA-Z0-9_\-]/g, "_") + ".lumina";
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaveDialogOpen(false);
+  };
+  const handleShowSave = () => { setSaveDialogName(showName); setSaveDialogOpen(true); };
+  const handleShowLoad = (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
+        if(data.fixtures) setFixtures(data.fixtures);
+        if(data.dmxPatch) setDmxPatch(data.dmxPatch);
+        else if(data.fixtures) setDmxPatch(generateDefaultPatch(data.fixtures));
+        if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
+        if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
+        if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
+        if(data.showName) setShowName(data.showName);
+        if(data.bpm !== undefined) setBpm(data.bpm);
+        if(data.loopStart !== undefined) setLoopStart(data.loopStart);
+        if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
+        if(data.loopEnabled !== undefined) setLoopEnabled(data.loopEnabled);
+        if(data.outputConfig) setOutputConfig(prev => ({...prev, ...data.outputConfig, enabled: false}));
+        if(data.nicConfig) setNicConfig(data.nicConfig);
+        if(data.customProfiles && typeof data.customProfiles === "object") {
+          Object.entries(data.customProfiles).forEach(([name, prof]) => {
+            DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
+            TYPE_COLORS[name] = prof.color || "#888888";
+          });
+          localStorage.setItem("lumina-custom-profiles", JSON.stringify(data.customProfiles));
+          setCustomProfilesVer(v => v + 1);
+        }
+        if(data.midiMap && typeof data.midiMap === "object") {
+          localStorage.setItem("lumina-midi-map", JSON.stringify(data.midiMap));
+        }
+      } catch(err) { alert("Failed to load show: " + err.message); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const shiftTimerRef = useRef(null);
   const beatEventRef = useRef(null);
 
@@ -1857,6 +1866,10 @@ function LightingTimeline() {
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCues(null);}else{setCopyMode(true);const sel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):selectedCue?cues.filter(c=>c.id===selectedCue):[];if(sel.length>0){setCopiedCues(sel.map(c=>({...c,id:null})));}}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCues?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCues?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCues?`PASTE (${copiedCues.length})`:"COPY"):"COPY"}</button>
         <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e1c16",border:"1px solid "+(undoHistoryRef.current.length?"#cc994466":"#3a3020"),color:undoHistoryRef.current.length?"#cc9944":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
+        <div style={{width:1,height:22,background:"#3a3020"}}/>
+        <button onClick={handleShowSave} style={{background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Save entire show">{"\uD83D\uDCBE"} SAVE SHOW</button>
+        <button onClick={()=>showFileInputRef.current.click()} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Load show file">{"\uD83D\uDCC2"} LOAD SHOW</button>
+        <input ref={showFileInputRef} type="file" accept=".lumina,.json" onChange={handleShowLoad} style={{display:"none"}}/>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
           <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#cc9944"}}/>
@@ -2071,7 +2084,7 @@ function LightingTimeline() {
                 </div>
               </div>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={playhead}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={playhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
@@ -2207,6 +2220,23 @@ function LightingTimeline() {
           </div>
         );
       })()}
+
+      {/* Save Show Dialog */}
+      {saveDialogOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10002,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setSaveDialogOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #44ffaa44",borderRadius:8,width:380,boxShadow:"0 8px 40px rgba(0,0,0,0.8)",padding:20,display:"flex",flexDirection:"column",gap:14}}>
+            <span style={{fontSize:12,fontWeight:"bold",color:"#44ffaa",letterSpacing:2}}>SAVE SHOW</span>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              <span style={{fontSize:9,color:"#555",letterSpacing:1}}>SHOW NAME</span>
+              <input type="text" value={saveDialogName} onChange={e=>setSaveDialogName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&saveDialogName.trim())doSaveShow(saveDialogName.trim());}} autoFocus style={{background:"#080a0e",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"8px 12px",fontSize:14,fontWeight:"bold",letterSpacing:1,outline:"none"}} placeholder="my-show"/>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setSaveDialogOpen(false)} style={{padding:"6px 16px",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#1e222a",border:"1px solid #2e3340",color:"#555",borderRadius:4,cursor:"pointer"}}>CANCEL</button>
+              <button onClick={()=>{if(saveDialogName.trim())doSaveShow(saveDialogName.trim());}} style={{padding:"6px 16px",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0a2a1a",border:"1px solid #44ffaa66",color:"#44ffaa",borderRadius:4,cursor:"pointer"}}>{"\uD83D\uDCBE"} SAVE</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fixture Manager Modal */}
       {fixtureManagerOpen && (
