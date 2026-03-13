@@ -241,7 +241,7 @@ function buildCurvePath(cue, w, h) {
   return `M ${pts.join(" L ")}`;
 }
 
-function CurvePath({ cue, w, h, color, isActive }) {
+const CurvePath = React.memo(function CurvePath({ cue, w, h, color, isActive }) {
   const path = useMemo(() => buildCurvePath(cue, w, h), [cue.easing, cue.fadeIn, cue.fadeOut, cue.value, cue.startValue, cue.endValue, w, h]);
   return (
     <svg style={{position:"absolute",top:0,left:0,width:w,height:h,pointerEvents:"none",overflow:"visible"}}>
@@ -251,7 +251,7 @@ function CurvePath({ cue, w, h, color, isActive }) {
       {(cue.fadeOut||0)>0 && <line x1={(1-cue.fadeOut)*w} y1={0} x2={(1-cue.fadeOut)*w} y2={h} stroke={color+"55"} strokeWidth={1} strokeDasharray="2,2"/>}
     </svg>
   );
-}
+});
 
 const EFFECT_TYPES = [
   { id:"chase", label:"Chase", icon:"\u21C6", desc:"Sequential across fixtures" },
@@ -382,7 +382,7 @@ function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfad
   return cues;
 }
 
-function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
+const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
   const [selFixtures, setSelFixtures] = useState(() => new Set(fixtures.slice(0,4).map(f=>f.id)));
   const [paramId, setParamId] = useState("dimmer");
   const [effectType, setEffectType] = useState("chase");
@@ -599,7 +599,7 @@ function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd
       {lastBatchId && <button onClick={handleUndo} style={{padding:"4px 0",background:"#ff333318",border:"1px solid #ff333366",color:"#ff5544",borderRadius:3,cursor:"pointer",fontSize:9,letterSpacing:1}}>UNDO LAST FX</button>}
     </div>
   );
-}
+});
 
 const SEQ_CATS = PARAM_GROUPS.map(g=>({
   id:g.group,
@@ -607,7 +607,7 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes }) {
+const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
@@ -748,7 +748,7 @@ function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStor
       </div>
     </div>
   );
-}
+});
 
 const defaultCues = [
   {id:genId(),fixtureId:1,param:"dimmer",beat:0,duration:4,value:100,easing:"easeIn",fadeIn:0.3,fadeOut:0.2,startValue:0,endValue:0},
@@ -765,7 +765,7 @@ const defaultCues = [
   {id:genId(),fixtureId:6,param:"yellow",beat:4,duration:8,value:100,easing:"bounce",fadeIn:0.4,fadeOut:0,startValue:0,endValue:0},
 ];
 
-function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
+const FixturePadBar = React.memo(function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
   const [activeParam, setActiveParam] = useState("dimmer");
   const [mode, setMode] = useState(null);
   const [heldPads, setHeldPads] = useState(new Set());
@@ -969,7 +969,7 @@ function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEve
       </div>
     </div>
   );
-}
+});
 
 function detectBpmFromBuffer(audioBuffer) {
   const rawData = audioBuffer.getChannelData(0);
@@ -1162,7 +1162,7 @@ function useAudioEngine({ bpm, playing, playhead, audioMode, audioVolume, audioM
   return { loadFile, startFilePlayback, stopFilePlayback, seekTo, getPlaybackBeat, ensureContext };
 }
 
-function WaveformCanvas({ peaks, durationBeats, beatWidth, zoom, scrollLeft, width, height, playhead, loopStart, loopEnd, loopEnabled }) {
+const WaveformCanvas = React.memo(function WaveformCanvas({ peaks, durationBeats, beatWidth, zoom, scrollLeft, width, height, playhead, loopStart, loopEnd, loopEnabled }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1196,9 +1196,9 @@ function WaveformCanvas({ peaks, durationBeats, beatWidth, zoom, scrollLeft, wid
     ctx.fillRect(phX - 0.5, 0, 1, height);
   }, [peaks, durationBeats, beatWidth, zoom, scrollLeft, width, height, playhead, loopStart, loopEnd, loopEnabled]);
   return <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,width:width,height:height,pointerEvents:'none'}} />;
-}
+});
 
-function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, beatDetected, detectedBpm, audioVolume, setAudioVolume, audioMuted, setAudioMuted, onFileLoad, bpm, setBpm }) {
+const AudioControlBar = React.memo(function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, beatDetected, detectedBpm, audioVolume, setAudioVolume, audioMuted, setAudioMuted, onFileLoad, bpm, setBpm }) {
   const fileInputRef = useRef(null);
   return (
     <div style={{height:30,background:'#14121a',borderBottom:'1px solid #2a2040',display:'flex',alignItems:'center',padding:'0 14px',gap:8,flexShrink:0}}>
@@ -1231,7 +1231,7 @@ function AudioControlBar({ audioMode, setAudioMode, audioFileName, audioLevel, b
       </div>}
     </div>
   );
-}
+});
 
 function LightingTimeline() {
   const [fixtures, setFixtures] = useState(() => { try { return JSON.parse(localStorage.getItem("lumina-fixtures")) || defaultFixtures(); } catch(e) { return defaultFixtures(); } });
@@ -1248,7 +1248,7 @@ function LightingTimeline() {
   const setCues = useCallback((updater) => {
     setCuesRaw(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      if(JSON.stringify(prev) !== JSON.stringify(next)){
+      if(prev !== next){
         undoHistoryRef.current = [...undoHistoryRef.current.slice(-19), prev];
       }
       return next;
@@ -1321,7 +1321,7 @@ function LightingTimeline() {
     setSelectedCue(null);
   }, [setCues]);
   const [playing,setPlaying] = useState(false);
-  const [playhead,setPlayhead] = useState(0);
+  const [displayPlayhead,setDisplayPlayhead] = useState(0);
   const [loopStart,setLoopStart] = useState(0);
   const [loopEnd,setLoopEnd] = useState(16);
   const [loopEnabled,setLoopEnabled] = useState(true);
@@ -1452,10 +1452,9 @@ function LightingTimeline() {
   const shiftTimerRef = useRef(null);
   const beatEventRef = useRef(null);
 
-  const timelineRef=useRef(null), animRef=useRef(null), lastTimeRef=useRef(null), stateRef=useRef({}), playheadRef=useRef(0);
+  const timelineRef=useRef(null), animRef=useRef(null), lastTimeRef=useRef(null), stateRef=useRef({}), playheadRef=useRef(0), lastVisualUpdateRef=useRef(0);
   const audioEngineRef = useRef(null);
-  stateRef.current={playhead,loopStart,loopEnd,loopEnabled,bpm,audioMode};
-  playheadRef.current=playhead;
+  stateRef.current={loopStart,loopEnd,loopEnabled,bpm,audioMode};
 
   const handleAudioLevel = useCallback((level) => setAudioLevel(level), []);
   const handleBeat = useCallback(() => {
@@ -1470,7 +1469,7 @@ function LightingTimeline() {
     setAudioFileName(fileName);
   }, []);
 
-  const audioEngine = useAudioEngine({ bpm, playing, playhead, audioMode, audioVolume, audioMuted, onLevel: handleAudioLevel, onBeat: handleBeat, onFileLoaded: handleFileLoaded });
+  const audioEngine = useAudioEngine({ bpm, playing, playhead: displayPlayhead, audioMode, audioVolume, audioMuted, onLevel: handleAudioLevel, onBeat: handleBeat, onFileLoaded: handleFileLoaded });
   audioEngineRef.current = audioEngine;
 
   const bw=BEAT_WIDTH*zoom;
@@ -1486,26 +1485,29 @@ function LightingTimeline() {
         audioEngineRef.current?.startFilePlayback(playheadRef.current);
       }
       const tick=now=>{
-        if(lastTimeRef.current===null) lastTimeRef.current=now;
+        if(lastTimeRef.current===null) { lastTimeRef.current=now; lastVisualUpdateRef.current=now; }
         const delta=(now-lastTimeRef.current)/1000;
         lastTimeRef.current=now;
         const {loopStart,loopEnd,loopEnabled,bpm,audioMode}=stateRef.current;
-        setPlayhead(prev=>{
-          let next;
-          if (audioMode === "file" && audioEngineRef.current) {
-            const audioBeat = audioEngineRef.current.getPlaybackBeat();
-            next = audioBeat !== null ? audioBeat : prev + delta*(bpm/60);
-          } else {
-            next = prev + delta*(bpm/60);
-          }
-          if(loopEnabled&&next>=loopEnd) {
-            next=loopStart+(next-loopEnd);
-            if (audioMode === "file") audioEngineRef.current?.seekTo(next);
-            setLoopFlash(true); setTimeout(()=>setLoopFlash(false), 250);
-          }
-          else if(next>=TOTAL_BEATS) next=0;
-          return next;
-        });
+        let next;
+        if (audioMode === "file" && audioEngineRef.current) {
+          const audioBeat = audioEngineRef.current.getPlaybackBeat();
+          next = audioBeat !== null ? audioBeat : playheadRef.current + delta*(bpm/60);
+        } else {
+          next = playheadRef.current + delta*(bpm/60);
+        }
+        if(loopEnabled&&next>=loopEnd) {
+          next=loopStart+(next-loopEnd);
+          if (audioMode === "file") audioEngineRef.current?.seekTo(next);
+          setLoopFlash(true); setTimeout(()=>setLoopFlash(false), 250);
+        }
+        else if(next>=TOTAL_BEATS) next=0;
+        playheadRef.current=next;
+        // Throttle React re-renders to ~15Hz (every 66ms) — DMX uses refs at full speed
+        if(now-lastVisualUpdateRef.current>=66){
+          lastVisualUpdateRef.current=now;
+          setDisplayPlayhead(next);
+        }
         animRef.current=requestAnimationFrame(tick);
       };
       animRef.current=requestAnimationFrame(tick);
@@ -1518,9 +1520,23 @@ function LightingTimeline() {
 
   const liveValues=useMemo(()=>{
     const map={};
-    cues.forEach(c=>{const k=`${c.fixtureId}-${c.param}`;if(!c.muted&&!mutedLanes.has(k)&&playhead>=c.beat&&playhead<c.beat+c.duration) map[k]=interpolateCue(c,playhead);});
+    cues.forEach(c=>{const k=`${c.fixtureId}-${c.param}`;if(!c.muted&&!mutedLanes.has(k)&&displayPlayhead>=c.beat&&displayPlayhead<c.beat+c.duration) map[k]=interpolateCue(c,displayPlayhead);});
     return map;
-  },[cues,playhead,mutedLanes]);
+  },[cues,displayPlayhead,mutedLanes]);
+
+  // Pre-index cues by lane for O(1) lookup instead of O(n) filter per lane
+  const cueIndex = useMemo(() => {
+    const idx = new Map();
+    const fxCounts = new Map();
+    cues.forEach(c => {
+      const laneKey = `${c.fixtureId}-${c.param}`;
+      if (!idx.has(laneKey)) idx.set(laneKey, []);
+      idx.get(laneKey).push(c);
+      fxCounts.set(c.fixtureId, (fxCounts.get(c.fixtureId) || 0) + 1);
+    });
+    idx._fxCounts = fxCounts;
+    return idx;
+  }, [cues]);
 
   // Output engine: send liveValues → WebSocket → bridge server → ArtNet/sACN
   const liveValuesRef = useRef({});
@@ -1619,22 +1635,25 @@ function LightingTimeline() {
     return () => clearInterval(iv);
   }, [outputConfig.enabled, outputConfig.dmxRate, outputConfig.inputEnabled]);
 
-  const rows=[];
-  let yOff=0;
-  fixtures.forEach(fx=>{
-    rows.push({type:"fixture",fixtureId:fx.id,y:yOff,h:FIXTURE_HDR_H}); yOff+=FIXTURE_HDR_H;
-    if(expandedFixtures.has(fx.id)){
-      const fxProfile = (DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT).map;
-      PARAM_GROUPS.forEach(group=>{
-        const visParams = group.params.filter(p => p.id in fxProfile);
-        if(visParams.length === 0) return;
-        const gk=`${fx.id}-${group.group}`;
-        rows.push({type:"group",fixtureId:fx.id,groupId:group.group,group:{...group,params:visParams},y:yOff,h:GROUP_HDR_H}); yOff+=GROUP_HDR_H;
-        if(expandedGroups.has(gk)){ visParams.forEach(param=>{ rows.push({type:"param",fixtureId:fx.id,paramId:param.id,param,y:yOff,h:LANE_H}); yOff+=LANE_H; }); }
-      });
-    }
-  });
-  const totalH=yOff, totalW=TOTAL_BEATS*bw;
+  const {rows, totalH} = useMemo(() => {
+    const rows=[];
+    let yOff=0;
+    fixtures.forEach(fx=>{
+      rows.push({type:"fixture",fixtureId:fx.id,y:yOff,h:FIXTURE_HDR_H}); yOff+=FIXTURE_HDR_H;
+      if(expandedFixtures.has(fx.id)){
+        const fxProfile = (DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT).map;
+        PARAM_GROUPS.forEach(group=>{
+          const visParams = group.params.filter(p => p.id in fxProfile);
+          if(visParams.length === 0) return;
+          const gk=`${fx.id}-${group.group}`;
+          rows.push({type:"group",fixtureId:fx.id,groupId:group.group,group:{...group,params:visParams},y:yOff,h:GROUP_HDR_H}); yOff+=GROUP_HDR_H;
+          if(expandedGroups.has(gk)){ visParams.forEach(param=>{ rows.push({type:"param",fixtureId:fx.id,paramId:param.id,param,y:yOff,h:LANE_H}); yOff+=LANE_H; }); }
+        });
+      }
+    });
+    return {rows, totalH: yOff};
+  }, [fixtures, expandedFixtures, expandedGroups]);
+  const totalW=TOTAL_BEATS*bw;
 
   const toggleFixture=id=>setExpandedFixtures(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
   const toggleGroup=gk=>setExpandedGroups(prev=>{const s=new Set(prev);s.has(gk)?s.delete(gk):s.add(gk);return s;});
@@ -1840,14 +1859,14 @@ function LightingTimeline() {
       <div style={{height:46,background:"#1e1c16",borderBottom:"1px solid #3a3020",display:"flex",alignItems:"center",padding:"0 14px",gap:10,flexShrink:0}}>
         <span style={{color:"#cc9944",fontWeight:"bold",fontSize:13,letterSpacing:3}}>{"\u2728"} LUMINA FX</span>
         <div style={{width:1,height:22,background:"#3a3020"}}/>
-        {[{icon:"\u23EE",fn:()=>{setPlayhead(0);if(audioMode==="file"&&playing)audioEngine.seekTo(0);}},{icon:"\u23F9",fn:()=>{setPlaying(false);setPlayhead(loopStart);audioEngine.stopFilePlayback();}},{icon:playing?"\u23F8":"\u25B6",fn:()=>{if(!playing&&audioMode!=="none")audioEngine.ensureContext();setPlaying(p=>!p);},active:playing}].map((b,i)=>(
+        {[{icon:"\u23EE",fn:()=>{playheadRef.current=0;setDisplayPlayhead(0);if(audioMode==="file"&&playing)audioEngine.seekTo(0);}},{icon:"\u23F9",fn:()=>{setPlaying(false);playheadRef.current=loopStart;setDisplayPlayhead(loopStart);audioEngine.stopFilePlayback();}},{icon:playing?"\u23F8":"\u25B6",fn:()=>{if(!playing&&audioMode!=="none")audioEngine.ensureContext();setPlaying(p=>!p);},active:playing}].map((b,i)=>(
           <button key={i} onClick={b.fn} style={{background:b.active?"#cc9944":"#1e1c16",border:"1px solid "+(b.active?"#cc9944":"#3a3020"),color:b.active?"#111":"#c0c6d0",borderRadius:4,padding:"3px 12px",cursor:"pointer",fontSize:14}}>{b.icon}</button>
         ))}
         <div style={{width:1,height:22,background:"#3a3020"}}/>
         <span style={{fontSize:9,color:"#555"}}>BPM</span>
         <input type="number" value={bpm} min={20} max={1200} onChange={e=>setBpm(+e.target.value)} style={{width:52,background:"#0c0e12",border:"1px solid #3a3020",color:"#cc9944",borderRadius:3,padding:"2px 6px",fontSize:12,textAlign:"center"}}/>
         <div style={{background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"2px 10px",fontSize:12,color:"#44ffaa",letterSpacing:2,minWidth:100,textAlign:"center"}}>
-          {String(Math.floor(playhead/4)+1).padStart(3,"0")} : {Math.floor(playhead%4)+1}
+          {String(Math.floor(displayPlayhead/4)+1).padStart(3,"0")} : {Math.floor(displayPlayhead%4)+1}
           <span style={{fontSize:8,color:"#333",marginLeft:4}}>BAR.BEAT</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4,background:"#0c0e12",border:"1px solid #252930",borderRadius:4,padding:"2px 8px"}}>
@@ -1907,7 +1926,7 @@ function LightingTimeline() {
                       {i%16===0?`\u266B${Math.floor(i/4)+1}`:`${Math.floor(i/4)+1}`}
                     </div>
                   ))}
-                  <div style={{position:"absolute",top:0,left:beatToX(playhead)-0.5,width:1,height:(RULER_H+(waveformPeaks?40:0))+totalH,background:"#ff3333",zIndex:30,pointerEvents:"none",boxShadow:"0 0 5px #ff333388"}}>
+                  <div style={{position:"absolute",top:0,left:beatToX(displayPlayhead)-0.5,width:1,height:(RULER_H+(waveformPeaks?40:0))+totalH,background:"#ff3333",zIndex:30,pointerEvents:"none",boxShadow:"0 0 5px #ff333388"}}>
                     <div style={{width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderTop:"7px solid #ff3333",transform:"translateX(-4.5px)"}}/>
                   </div>
                 </div>
@@ -1915,7 +1934,7 @@ function LightingTimeline() {
               {waveformPeaks&&<div style={{height:40,background:'#0a0c10',borderTop:'1px solid #1e222a',display:'flex'}}>
                 <div style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:'1px solid #1e222a',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,color:'#2a2e38',letterSpacing:1}}>{"\u266A"} WAVEFORM</div>
                 <div style={{position:'relative',flex:1,overflow:'hidden'}}>
-                  <WaveformCanvas peaks={waveformPeaks} durationBeats={audioDurationBeats} beatWidth={BEAT_WIDTH} zoom={zoom} scrollLeft={scrollLeft} width={Math.max(100,totalW)} height={40} playhead={playhead} loopStart={loopStart} loopEnd={loopEnd} loopEnabled={loopEnabled}/>
+                  <WaveformCanvas peaks={waveformPeaks} durationBeats={audioDurationBeats} beatWidth={BEAT_WIDTH} zoom={zoom} scrollLeft={scrollLeft} width={Math.max(100,totalW)} height={40} playhead={displayPlayhead} loopStart={loopStart} loopEnd={loopEnd} loopEnabled={loopEnabled}/>
                 </div>
               </div>}
             </div>
@@ -1924,7 +1943,7 @@ function LightingTimeline() {
               if(row.type==="fixture"){
                 const fx=fixtures.find(f=>f.id===row.fixtureId);
                 const isExp=expandedFixtures.has(fx.id);
-                const hasActive=cues.some(c=>c.fixtureId===fx.id&&playhead>=c.beat&&playhead<c.beat+c.duration);
+                const hasActive=Object.keys(liveValues).some(k=>k.startsWith(fx.id+"-"));
                 return(
                   <div key={`fx-${fx.id}`} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:"#1a2238",borderBottom:"1px solid #2a3a55",zIndex:6}}>
                     <div onClick={()=>toggleFixture(fx.id)} style={{width:LABEL_W+PARAM_LABEL_W,flexShrink:0,borderRight:"1px solid #3a4050",display:"flex",alignItems:"center",padding:"0 8px",gap:7,cursor:"pointer"}}>
@@ -1935,7 +1954,7 @@ function LightingTimeline() {
                         <div style={{fontSize:8,color:"#3a3f4c"}}>{fx.type}</div>
                       </div>
                       <div style={{flex:1}}/>
-                      <div style={{fontSize:8,color:"#333"}}>{cues.filter(c=>c.fixtureId===fx.id).length}c</div>
+                      <div style={{fontSize:8,color:"#333"}}>{cueIndex._fxCounts.get(fx.id)||0}c</div>
                     </div>
                     <div style={{flex:1,background:"#1c2030"}}/>
                   </div>
@@ -1961,7 +1980,7 @@ function LightingTimeline() {
                 const laneKey=`${row.fixtureId}-${row.paramId}`;
                 const isMuted=mutedLanes.has(laneKey);
                 const toggleMute=()=>setMutedLanes(prev=>{const n=new Set(prev);if(n.has(laneKey))n.delete(laneKey);else n.add(laneKey);return n;});
-                const laneCues=cues.filter(c=>c.fixtureId===row.fixtureId&&c.param===row.paramId);
+                const laneCues=cueIndex.get(laneKey)||[];
                 const liveVal=liveValues[laneKey];
                 return(
                   <div key={laneKey} style={{position:"absolute",top:(RULER_H+(waveformPeaks?40:0))+row.y,width:LABEL_W+PARAM_LABEL_W+totalW,height:row.h,display:"flex",background:isMuted?"#12141a":ri%2===0?"#141828":"#161a2c",borderBottom:"1px solid #1e2840"}}>
@@ -1986,7 +2005,7 @@ function LightingTimeline() {
                       {isMuted&&<div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(255,68,0,0.03) 8px,rgba(255,68,0,0.03) 16px)",pointerEvents:"none",zIndex:4}}/>}
                       {laneCues.map(cue=>{
                         const isCueMuted=cue.muted===true;
-                        const isActive=!isMuted&&!isCueMuted&&playhead>=cue.beat&&playhead<cue.beat+cue.duration;
+                        const isActive=!isMuted&&!isCueMuted&&displayPlayhead>=cue.beat&&displayPlayhead<cue.beat+cue.duration;
                         const isSel=selectedCue===cue.id||selectedCues.has(cue.id);
                         const cueW=Math.max(4,beatToX(cue.duration)-2);
                         const cueH=row.h-4;
@@ -2084,7 +2103,7 @@ function LightingTimeline() {
                 </div>
               </div>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={playhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={displayPlayhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
@@ -2631,7 +2650,7 @@ function LightingTimeline() {
         </div>
       )}
 
-      <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={playhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
+      <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={displayPlayhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
 
       <div style={{height:22,background:"#1a1814",borderTop:"1px solid #3a3020",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
         {[{label:"FIX",val:fixtures.length},{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"},{label:"INPUT",val:outputConfig.inputEnabled?"ON":"OFF"}].map(item=>(
