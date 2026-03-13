@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Lumina FX Launcher
+# Auto-finds Node.js and the project folder, starts the server, opens the browser
+
+# Find Node.js (check common locations)
+NODE_BIN=""
+for p in \
+  /usr/local/bin/node \
+  /opt/homebrew/bin/node \
+  "$HOME/.nvm/versions/node"/*/bin/node \
+  "$HOME/.volta/bin/node"; do
+  if [ -x "$p" ]; then
+    NODE_BIN="$p"
+    break
+  fi
+done
+
+# Also try loading NVM if node not found directly
+if [ -z "$NODE_BIN" ] && [ -s "$HOME/.nvm/nvm.sh" ]; then
+  source "$HOME/.nvm/nvm.sh"
+  NODE_BIN=$(which node 2>/dev/null)
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  osascript -e 'display alert "Lumina FX" message "Node.js not found. Please install Node.js first." as critical'
+  exit 1
+fi
+
+# Find lighting-server.js
+SERVER_PATH=$(find /Users -name "lighting-server.js" -not -path "*/node_modules/*" -not -path "*/.app/*" -maxdepth 6 2>/dev/null | head -1)
+
+if [ -z "$SERVER_PATH" ]; then
+  osascript -e 'display alert "Lumina FX" message "Could not find lighting-server.js on this machine." as critical'
+  exit 1
+fi
+
+PROJECT_DIR=$(dirname "$SERVER_PATH")
+
+# Kill any existing Lumina server
+pkill -f "node.*lighting-server.js" 2>/dev/null
+sleep 0.5
+
+# Start the server in background
+cd "$PROJECT_DIR"
+"$NODE_BIN" lighting-server.js &
+SERVER_PID=$!
+
+# Wait for server to be ready (up to 6 seconds)
+for i in {1..20}; do
+  if curl -s http://localhost:3457 > /dev/null 2>&1; then
+    break
+  fi
+  sleep 0.3
+done
+
+# Open in default browser
+open "http://localhost:3457"
+
+# Keep running so the server stays alive
+wait $SERVER_PID
