@@ -7,6 +7,9 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #0f1115; }
+    input[type=range] { -webkit-appearance: none; appearance: none; background: #1e222a; border-radius: 4px; outline: none; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border-radius: 50%; background: #e8aa22; cursor: pointer; border: 2px solid #0f1115; }
+    input[type=range]::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: #1e222a; }
   </style>
 </head>
 <body>
@@ -41,19 +44,10 @@ const PARAM_GROUPS = [
     { id:"tilt", label:"Tilt", unit:"\u00B0", min:0, max:270, color:"#66ccff" },
   ]},
   { group:"COLOR", color:"#ff66aa", params:[
-    { id:"red", label:"Red", unit:"%", min:0, max:100, color:"#ff4444" },
-    { id:"green", label:"Green", unit:"%", min:0, max:100, color:"#44ff44" },
-    { id:"blue", label:"Blue", unit:"%", min:0, max:100, color:"#4488ff" },
     { id:"cyan", label:"C", unit:"%", min:0, max:100, color:"#44ffff" },
     { id:"magenta", label:"M", unit:"%", min:0, max:100, color:"#ff44ff" },
     { id:"yellow", label:"Y", unit:"%", min:0, max:100, color:"#ffff44" },
     { id:"white", label:"W", unit:"%", min:0, max:100, color:"#eeeedd" },
-    { id:"amber", label:"Amber", unit:"%", min:0, max:100, color:"#ffaa22" },
-    { id:"uv", label:"UV", unit:"%", min:0, max:100, color:"#8844ff" },
-    { id:"warm_white", label:"WW", unit:"%", min:0, max:100, color:"#ffddaa" },
-    { id:"cool_white", label:"CW", unit:"%", min:0, max:100, color:"#ccddff" },
-    { id:"lime", label:"Lime", unit:"%", min:0, max:100, color:"#aaff44" },
-    { id:"indigo", label:"Indigo", unit:"%", min:0, max:100, color:"#4400cc" },
     { id:"cto", label:"CTO", unit:"%", min:0, max:100, color:"#ffbb66" },
     { id:"colorwheel", label:"Color", unit:"slot", min:0, max:16, color:"#ff88cc" },
   ]},
@@ -61,9 +55,6 @@ const PARAM_GROUPS = [
     { id:"zoom", label:"Zoom", unit:"\u00B0", min:5, max:60, color:"#ffaa44" },
     { id:"iris", label:"Iris", unit:"%", min:0, max:100, color:"#ffbb55" },
     { id:"focus", label:"Focus", unit:"%", min:0, max:100, color:"#ffcc66" },
-    { id:"frost", label:"Frost", unit:"%", min:0, max:100, color:"#aaddff" },
-    { id:"prism", label:"Prism", unit:"slot", min:0, max:8, color:"#ff66dd" },
-    { id:"prism_rot", label:"Prism Rot", unit:"\u00B0", min:0, max:360, color:"#ff88ee" },
   ]},
   { group:"BLADES", color:"#aa66ff", params:[
     { id:"blade_a", label:"Blade A", unit:"%", min:0, max:100, color:"#aa66ff" },
@@ -424,6 +415,8 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
   const toggleFx = id => setSelFixtures(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   const selAll = () => setSelFixtures(new Set(fixtures.map(f => f.id)));
   const selNone = () => setSelFixtures(new Set());
+  const [fxPickerOpen, setFxPickerOpen] = useState(false);
+  const [fxPickerPos, setFxPickerPos] = useState({x:0,y:0});
 
   const handleApply = () => {
     let fxList = fixtures.filter(f => selFixtures.has(f.id));
@@ -518,22 +511,49 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
     <div style={{padding:8,display:"flex",flexDirection:"column",gap:8,fontSize:9}}>
       <div>
         <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>FIXTURES</div>
-        <div style={{display:"flex",gap:2,marginBottom:4,flexWrap:"wrap"}}>
-          <button onClick={selAll} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>ALL</button>
-          <button onClick={selNone} style={{padding:"1px 6px",fontSize:8,background:"#0c0e12",border:"1px solid #252930",color:"#888",borderRadius:2,cursor:"pointer"}}>NONE</button>
-          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
-          {Object.keys(DMX_PROFILES).map(t=>{const ids=fixtures.filter(f=>f.type===t).map(f=>f.id);if(ids.length===0)return null;const allSel=ids.every(id=>selFixtures.has(id));return <button key={t} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 6px",fontSize:8,background:allSel?"#e8aa2218":"#0c0e12",border:`1px solid ${allSel?"#e8aa22":"#252930"}`,color:allSel?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{t}</button>;})}
-          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
-          {[...new Set(fixtures.map(f=>f.color))].map(col=>{const ids=fixtures.filter(f=>f.color===col).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={col} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 4px",fontSize:8,background:allSel?col+"33":"#0c0e12",border:`1px solid ${allSel?col:"#252930"}`,borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><div style={{width:8,height:8,borderRadius:"50%",background:col}}/></button>;})}
-          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
-          {[...new Set(fixtures.map(f=>f.position||"FRONT 1"))].map(pos=>{const posCol=POSITION_COLORS[pos]||"#888";const ids=fixtures.filter(f=>(f.position||"FRONT 1")===pos).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={pos} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 6px",fontSize:7,background:allSel?posCol+"22":"#0c0e12",border:`1px solid ${allSel?posCol:posCol+"44"}`,color:allSel?posCol:posCol+"88",borderRadius:2,cursor:"pointer",letterSpacing:0.5}}>{pos}</button>;})}
+        <div onClick={e=>{setFxPickerPos({x:e.clientX,y:e.clientY});setFxPickerOpen(true);}} onTouchEnd={e=>{const t=e.changedTouches[0];setFxPickerPos({x:t.clientX,y:t.clientY});setFxPickerOpen(true);e.preventDefault();}} style={{display:"flex",flexWrap:"wrap",gap:4,cursor:"pointer",padding:2,touchAction:"manipulation"}}>
+          {fixtures.map(fx=>{const sel=selFixtures.has(fx.id);return <div key={fx.id} style={{display:"flex",alignItems:"center",gap:3,padding:"1px 5px",background:sel?"transparent":"transparent",borderRadius:3}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:sel?fx.color:"#252930",boxShadow:sel?`0 0 6px ${fx.color}, 0 0 12px ${fx.color}55`:"none",transition:"all 0.2s"}}/>
+            <span style={{fontSize:8,color:sel?fx.color:"#333",transition:"color 0.2s"}}>{fx.name}</span>
+          </div>;})}
         </div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-          {fixtures.map(fx => {
-            const sel = selFixtures.has(fx.id);
-            return <button key={fx.id} onClick={()=>toggleFx(fx.id)} style={{padding:"2px 5px",fontSize:8,background:sel?fx.color+"22":"#0c0e12",border:`1px solid ${sel?fx.color:"#252930"}`,color:sel?fx.color:"#444",borderRadius:3,cursor:"pointer",fontWeight:sel?"bold":"normal"}}>{fx.name}</button>;
-          })}
-        </div>
+        {fxPickerOpen&&(()=>{
+          const PW=300,PAD=8;
+          const px=Math.max(PAD,Math.min(fxPickerPos.x-PW/2,window.innerWidth-PW-PAD));
+          const py=Math.max(PAD,Math.min(fxPickerPos.y+10,window.innerHeight-500-PAD));
+          const types=[...new Set(fixtures.map(f=>f.type))];
+          const colors=[...new Set(fixtures.map(f=>f.color))];
+          const positions=[...new Set(fixtures.map(f=>f.position||"FRONT 1"))];
+          const btnS=(sel,col)=>({minHeight:44,background:sel?col+"22":"#0c0e12",border:`1px solid ${sel?col:"#252930"}`,color:sel?col:"#555",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:6,touchAction:"manipulation"});
+          return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002}} onClick={()=>setFxPickerOpen(false)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:10003,background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:8,padding:10,boxShadow:"0 6px 30px rgba(0,0,0,0.8)",width:PW,maxHeight:"80vh",overflowY:"auto"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:6,marginBottom:6}}>
+                <span style={{fontSize:11,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>SELECT FIXTURES</span>
+                <button onClick={()=>setFxPickerOpen(false)} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
+                <button onClick={selAll} style={btnS(selFixtures.size===fixtures.length,"#44ffaa")}>ALL</button>
+                <button onClick={selNone} style={btnS(selFixtures.size===0,"#ff6644")}>NONE</button>
+              </div>
+              {types.length>1&&<><div style={{fontSize:9,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>BY TYPE</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
+                {types.map(t=>{const ids=fixtures.filter(f=>f.type===t).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={t} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={btnS(allSel,TYPE_COLORS[t]||"#e8aa22")}>{t} <span style={{fontSize:9,opacity:0.6}}>({ids.length})</span></button>;})}
+              </div></>}
+              {colors.length>1&&<><div style={{fontSize:9,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>BY COLOR</div>
+              <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(colors.length,4)},1fr)`,gap:4,marginBottom:8}}>
+                {colors.map(col=>{const ids=fixtures.filter(f=>f.color===col).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={col} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{...btnS(allSel,col),padding:"0 4px"}}><div style={{width:14,height:14,borderRadius:"50%",background:col,boxShadow:allSel?`0 0 8px ${col}`:"none"}}/><span style={{fontSize:9,opacity:0.6}}>({ids.length})</span></button>;})}
+              </div></>}
+              {positions.length>1&&<><div style={{fontSize:9,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>BY POSITION</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
+                {positions.map(pos=>{const posCol=POSITION_COLORS[pos]||"#888";const ids=fixtures.filter(f=>(f.position||"FRONT 1")===pos).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={pos} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={btnS(allSel,posCol)}>{pos} <span style={{fontSize:9,opacity:0.6}}>({ids.length})</span></button>;})}
+              </div></>}
+              <div style={{fontSize:9,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>INDIVIDUAL</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                {fixtures.map(fx=>{const sel=selFixtures.has(fx.id);return <button key={fx.id} onClick={()=>toggleFx(fx.id)} style={btnS(sel,fx.color)}><div style={{width:10,height:10,borderRadius:"50%",background:fx.color,opacity:sel?1:0.3}}/>{fx.name}</button>;})}
+              </div>
+            </div>
+          </div>;
+        })()}
       </div>
 
       {!isBallyhoo && <div>
@@ -559,31 +579,35 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
         <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>PARAMETERS</div>
         <div style={{display:"flex",flexDirection:"column",gap:5}}>
           <div>
-            <span style={{fontSize:8,color:"#555"}}>SPEED (beats/cycle)</span>
-            <div style={{display:"flex",gap:3,marginTop:2}}>
-              {[0.5,1,2,4,8,16].map(v => <button key={v} onClick={()=>setSpeed(v)} style={{flex:1,padding:"2px 0",fontSize:8,background:speed===v?"#e8aa2233":"#0c0e12",border:`1px solid ${speed===v?"#e8aa22":"#252930"}`,color:speed===v?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{v}</button>)}
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:10,color:"#555"}}>SPEED (beats/cycle)</span>
+              <span style={{fontSize:13,color:"#e8aa22",fontWeight:"bold",marginLeft:"auto"}}>{speed}</span>
+            </div>
+            <input type="range" min={0.25} max={32} step={0.25} value={speed} onChange={e=>setSpeed(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22",marginTop:4,height:28}}/>
+            <div style={{display:"flex",gap:4,marginTop:4}}>
+              {[0.5,1,2,4,8,16].map(v => <button key={v} onClick={()=>setSpeed(v)} style={{flex:1,minHeight:36,fontSize:12,fontWeight:"bold",background:speed===v?"#e8aa2233":"#0c0e12",border:`1px solid ${speed===v?"#e8aa22":"#252930"}`,color:speed===v?"#e8aa22":"#555",borderRadius:4,cursor:"pointer"}}>{v}</button>)}
             </div>
           </div>
           <div>
-            <span style={{fontSize:8,color:"#555"}}>SPREAD ({offset}% {"\u00B7"} {selFixtures.size}fx)</span>
-            <input type="range" min={0} max={100} value={offset} onChange={e=>setOffset(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22"}}/>
+            <span style={{fontSize:10,color:"#555"}}>SPREAD ({offset}% {"\u00B7"} {selFixtures.size}fx)</span>
+            <input type="range" min={0} max={100} value={offset} onChange={e=>setOffset(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22",height:28,marginTop:4}}/>
           </div>
           <div>
-            <span style={{fontSize:8,color:"#555"}}>DIRECTION</span>
-            <div style={{display:"flex",gap:2,marginTop:2}}>
+            <span style={{fontSize:10,color:"#555"}}>DIRECTION</span>
+            <div style={{display:"flex",gap:4,marginTop:4}}>
               {[{id:"fwd",label:"\u25B6 FWD",desc:"1,2,3..."},{id:"bwd",label:"\u25C0 BWD",desc:"...3,2,1"}].map(d=>(
-                <button key={d.id} onClick={()=>setDirection(d.id)} style={{flex:1,padding:"3px 5px",fontSize:8,background:direction===d.id?"#252a34":"#0c0e12",border:`1px solid ${direction===d.id?"#e8aa22":"#252930"}`,color:direction===d.id?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{d.label} <span style={{color:direction===d.id?"#e8aa2288":"#333",fontSize:7}}>{d.desc}</span></button>
+                <button key={d.id} onClick={()=>setDirection(d.id)} style={{flex:1,minHeight:36,padding:"6px 8px",fontSize:11,background:direction===d.id?"#252a34":"#0c0e12",border:`1px solid ${direction===d.id?"#e8aa22":"#252930"}`,color:direction===d.id?"#e8aa22":"#555",borderRadius:4,cursor:"pointer"}}>{d.label} <span style={{color:direction===d.id?"#e8aa2288":"#333",fontSize:9}}>{d.desc}</span></button>
               ))}
             </div>
           </div>
           {(effectType==="chase"||effectType==="rampUp"||effectType==="rampDown")&&<div>
-            <span style={{fontSize:8,color:"#555"}}>CROSSFADE ({crossfade}%)</span>
-            <input type="range" min={0} max={100} value={crossfade} onChange={e=>setCrossfade(+e.target.value)} style={{width:"100%",accentColor:"#44ffaa"}}/>
+            <span style={{fontSize:10,color:"#555"}}>CROSSFADE ({crossfade}%)</span>
+            <input type="range" min={0} max={100} value={crossfade} onChange={e=>setCrossfade(+e.target.value)} style={{width:"100%",accentColor:"#44ffaa",height:28,marginTop:4}}/>
           </div>}
           {!isBallyhoo && <div>
-            <span style={{fontSize:8,color:"#555"}}>EASING</span>
-            <div style={{display:"flex",flexWrap:"wrap",gap:2,marginTop:2}}>
-              {Object.entries(EASINGS).map(([k,def]) => <button key={k} onClick={()=>setEasing(k)} style={{padding:"2px 5px",fontSize:8,background:easing===k?"#252a34":"#0c0e12",border:`1px solid ${easing===k?"#e8aa22":"#252930"}`,color:easing===k?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{def.icon} {def.label}</button>)}
+            <span style={{fontSize:10,color:"#555"}}>EASING</span>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginTop:4}}>
+              {Object.entries(EASINGS).map(([k,def]) => <button key={k} onClick={()=>setEasing(k)} style={{minHeight:36,padding:"6px 8px",fontSize:11,fontWeight:"bold",background:easing===k?"#252a34":"#0c0e12",border:`1px solid ${easing===k?"#e8aa22":"#252930"}`,color:easing===k?"#e8aa22":"#555",borderRadius:4,cursor:"pointer"}}>{def.icon} {def.label}</button>)}
             </div>
           </div>}
           <div style={{fontSize:8,color:"#bb44ff88",letterSpacing:2}}>FX RANGE: {fxStart} → {fxEnd} <span style={{color:"#bb44ff55"}}>(drag purple markers)</span></div>
