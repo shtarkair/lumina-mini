@@ -1293,9 +1293,17 @@ function LightingTimeline() {
   // RDM Discovery state
   const [rdmDiscovering, setRdmDiscovering] = useState(false);
   const [rdmDevices, setRdmDevices] = useState([]);
+  const [rdmNodes, setRdmNodes] = useState([]);  // ArtPollReply nodes
   const [rdmProgress, setRdmProgress] = useState(null);
   const [rdmDialogOpen, setRdmDialogOpen] = useState(false);
   const [rdmSelected, setRdmSelected] = useState(new Set());
+  // MVR Import state
+  const [mvrDialogOpen, setMvrDialogOpen] = useState(false);
+  const [mvrFixtures, setMvrFixtures] = useState([]);
+  const [mvrSelected, setMvrSelected] = useState(new Set());
+  const [mvrPositions, setMvrPositions] = useState({}); // uuid → position override
+  const [mvrLoading, setMvrLoading] = useState(false);
+  const [mvrPosDropdown, setMvrPosDropdown] = useState(null); // uuid of open dropdown
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -1684,14 +1692,13 @@ function LightingTimeline() {
             }
             if (msg.type === 'rdm_results') {
               setRdmDevices(msg.devices || []);
+              setRdmNodes(msg.nodes || []);
               setRdmDiscovering(false);
               setRdmProgress(null);
               if ((msg.devices || []).length > 0) {
                 setRdmSelected(new Set(msg.devices.map(d => d.uid)));
-                setRdmDialogOpen(true);
-              } else {
-                setRdmDialogOpen(true); // show dialog with "no devices" message
               }
+              setRdmDialogOpen(true); // always show dialog (devices or nodes info)
             }
           } catch(e) {}
         };
@@ -2627,13 +2634,173 @@ function LightingTimeline() {
         </div>
       )}
 
+      {/* MVR Import Dialog */}
+      {mvrDialogOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10004,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{setMvrDialogOpen(false);setMvrPosDropdown(null);}}>
+          <div onClick={e=>{e.stopPropagation();setMvrPosDropdown(null);}} style={{background:"#0e1018",border:"1px solid #8844ff44",borderRadius:8,width:800,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,0.8)",display:"flex",flexDirection:"column"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #1e222a"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#8844ff",letterSpacing:2}}>📦 MVR IMPORT</span>
+              <span style={{marginLeft:8,fontSize:10,color:"#666"}}>{mvrFixtures.length} fixture{mvrFixtures.length!==1?"s":""}</span>
+              <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                <button onClick={()=>setMvrSelected(new Set(mvrFixtures.map(f=>f.uuid)))} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>SELECT ALL</button>
+                <button onClick={()=>setMvrSelected(new Set())} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>DESELECT</button>
+                <button onClick={()=>{setMvrDialogOpen(false);setMvrPosDropdown(null);}} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+            <div style={{display:"flex",padding:"6px 16px",gap:4,borderBottom:"1px solid #1a1d22",fontSize:8,color:"#555",letterSpacing:1}}>
+              <span style={{width:24,textAlign:"center"}}>☑</span>
+              <span style={{width:30,textAlign:"center"}}>UNI</span>
+              <span style={{width:40,textAlign:"center"}}>ADDR</span>
+              <span style={{flex:1}}>NAME</span>
+              <span style={{width:150}}>MANUFACTURER / MODEL</span>
+              <span style={{width:70}}>MODE</span>
+              <span style={{width:90}}>POSITION</span>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"4px 16px 8px",maxHeight:"50vh"}}>
+              {mvrFixtures.length === 0 && <div style={{padding:20,textAlign:"center",fontSize:11,color:"#444"}}>No fixtures found in MVR file</div>}
+              {mvrFixtures.map(fx => {
+                const sel = mvrSelected.has(fx.uuid);
+                const pos = mvrPositions[fx.uuid] || fx.mappedPosition || 'FRONT 1';
+                const posCol = POSITION_COLORS[pos] || '#888';
+                return (
+                  <div key={fx.uuid} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0",borderTop:"1px solid #1a1d22",opacity:sel?1:0.5}}>
+                    <span onClick={e=>{e.stopPropagation();setMvrSelected(prev=>{const n=new Set(prev);if(n.has(fx.uuid))n.delete(fx.uuid);else n.add(fx.uuid);return n;});}} style={{width:24,textAlign:"center",fontSize:12,color:sel?"#8844ff":"#333",cursor:"pointer"}}>{sel?"☑":"☐"}</span>
+                    <span style={{width:30,textAlign:"center",fontSize:10,color:"#4488ff"}}>{fx.universe}</span>
+                    <span style={{width:40,textAlign:"center",fontSize:10,color:"#44ffaa",fontFamily:"monospace"}}>{String(fx.address).padStart(3,'0')}</span>
+                    <div style={{flex:1,overflow:"hidden"}}>
+                      <div style={{fontSize:10,color:"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fx.name}</div>
+                      {fx.group && <div style={{fontSize:7,color:"#555"}}>{fx.layer}{fx.group ? ' / '+fx.group : ''}</div>}
+                    </div>
+                    <div style={{width:150,overflow:"hidden"}}>
+                      <div style={{fontSize:10,color:"#aaa",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fx.manufacturer} {fx.model}</div>
+                    </div>
+                    <span style={{width:70,fontSize:9,color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fx.gdtfMode || '—'}</span>
+                    <div style={{width:90,position:"relative"}}>
+                      <div onClick={e=>{e.stopPropagation();setMvrPosDropdown(mvrPosDropdown===fx.uuid?null:fx.uuid);}} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 6px",border:"1px solid "+posCol+"44",borderRadius:3,cursor:"pointer",fontSize:9,color:posCol}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:posCol,flexShrink:0}}/>
+                        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pos}</span>
+                      </div>
+                      {mvrPosDropdown === fx.uuid && (
+                        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:10,background:"#14161e",border:"1px solid #2a2d36",borderRadius:4,padding:2,boxShadow:"0 4px 12px rgba(0,0,0,0.6)"}}>
+                          {FIXTURE_POSITIONS.map(p => {
+                            const pc = POSITION_COLORS[p]||'#888';
+                            return (
+                              <div key={p} onClick={e=>{e.stopPropagation();setMvrPositions(prev=>({...prev,[fx.uuid]:p}));setMvrPosDropdown(null);}} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 6px",cursor:"pointer",borderRadius:2,fontSize:8,color:pos===p?pc:"#aaa",background:pos===p?pc+"18":"transparent"}}>
+                                <div style={{width:5,height:5,borderRadius:"50%",background:pc,flexShrink:0}}/>
+                                <span>{p}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{padding:"10px 16px",borderTop:"1px solid #1e222a",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:9,color:"#666"}}>{mvrSelected.size} of {mvrFixtures.length} selected</span>
+              <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                <button onClick={()=>{setMvrDialogOpen(false);setMvrPosDropdown(null);}} style={{padding:"6px 16px",fontSize:10,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CANCEL</button>
+                <button onClick={()=>{
+                  if (mvrSelected.size === 0) return;
+                  const selected = mvrFixtures.filter(f => mvrSelected.has(f.uuid));
+                  const maxId = fixtures.reduce((m,f) => Math.max(m, f.id), 0);
+                  const newFixtures = [];
+                  const newPatch = {...dmxPatch};
+
+                  // Use fixture library for profile matching
+                  const libData = fixtureLibraryData;
+
+                  selected.forEach((mvr, idx) => {
+                    const fxId = maxId + 1 + idx;
+                    // Profile matching: model key → existing profiles → library → generic
+                    let profileName = null;
+                    const modelKey = (mvr.model || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                    const allProfiles = Object.keys(DMX_PROFILES).filter(p => !hiddenProfiles.has(p));
+
+                    // Tier 1: exact model match in DMX_PROFILES
+                    if (modelKey && DMX_PROFILES[modelKey]) profileName = modelKey;
+                    // Tier 1b: try manufacturer_model
+                    if (!profileName) {
+                      const mfrModelKey = ((mvr.manufacturer || '') + '_' + (mvr.model || '')).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                      if (DMX_PROFILES[mfrModelKey]) profileName = mfrModelKey;
+                    }
+                    // Tier 2: search fixture library by manufacturer+model
+                    if (!profileName && libData && libData.manufacturers) {
+                      const mfrKey = Object.keys(libData.manufacturers).find(k => {
+                        const mfrName = (libData.manufacturers[k].name || '').toLowerCase().replace(/[^a-z0-9]/g,'');
+                        return mfrName === (mvr.manufacturer || '').toLowerCase().replace(/[^a-z0-9]/g,'') || mfrName.includes((mvr.manufacturer || '').toLowerCase().replace(/[^a-z0-9]/g,''));
+                      });
+                      if (mfrKey) {
+                        const mfrFixtures = libData.manufacturers[mfrKey].fixtures || [];
+                        const libFx = mfrFixtures.find(lf => {
+                          const ln = (lf.name || '').toLowerCase().replace(/[^a-z0-9]/g,'');
+                          const mn = (mvr.model || '').toLowerCase().replace(/[^a-z0-9]/g,'');
+                          return ln.includes(mn) || mn.includes(ln);
+                        });
+                        if (libFx && libFx.modes && libFx.modes.length > 0) {
+                          let bestMode = libFx.modes[0];
+                          const mvrMode = (mvr.gdtfMode || '').toLowerCase();
+                          for (const mode of libFx.modes) {
+                            if (mode.name && mode.name.toLowerCase().includes(mvrMode)) { bestMode = mode; break; }
+                          }
+                          const baseName = (libFx.shortName || libFx.name).toUpperCase().replace(/[^A-Z0-9]/g,'_');
+                          const modeSuffix = libFx.modes.length > 1 ? '_' + bestMode.channels + 'CH' : '';
+                          profileName = (baseName + modeSuffix).replace(/_+/g,'_').replace(/^_|_$/g,'');
+                          if (!DMX_PROFILES[profileName]) {
+                            DMX_PROFILES[profileName] = { channels: bestMode.channels, map: bestMode.map };
+                            TYPE_COLORS[profileName] = '#8844ff';
+                            try {
+                              const cp = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}");
+                              cp[profileName] = { channels: bestMode.channels, map: bestMode.map, color: '#8844ff' };
+                              localStorage.setItem("lumina-custom-profiles", JSON.stringify(cp));
+                            } catch(e) {}
+                          }
+                        }
+                      }
+                    }
+                    // Tier 3: generic fallback
+                    if (!profileName) {
+                      const genName = (modelKey || 'MVR') + '_GENERIC';
+                      if (!DMX_PROFILES[genName]) {
+                        DMX_PROFILES[genName] = { channels: 1, map: { dimmer: {offset:0, bits:8} } };
+                        TYPE_COLORS[genName] = '#8844ff';
+                        try {
+                          const cp = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}");
+                          cp[genName] = { channels: 1, map: { dimmer: {offset:0, bits:8} }, color: '#8844ff' };
+                          localStorage.setItem("lumina-custom-profiles", JSON.stringify(cp));
+                        } catch(e) {}
+                      }
+                      profileName = genName;
+                    }
+                    const pos = mvrPositions[mvr.uuid] || mvr.mappedPosition || 'FRONT 1';
+                    const name = mvr.name || (mvr.model ? mvr.model + ' ' + (idx+1) : 'MVR ' + fxId);
+                    const color = TYPE_COLORS[profileName] || POSITION_COLORS[pos] || '#8844ff';
+                    newFixtures.push({ id: fxId, name, color, type: profileName, position: pos });
+                    newPatch[fxId] = { universe: mvr.universe, address: mvr.address, profile: profileName, overrides: {} };
+                  });
+                  setFixtures(prev => [...prev, ...newFixtures]);
+                  setDmxPatch(newPatch);
+                  setMvrDialogOpen(false);
+                  setMvrPosDropdown(null);
+                  setCustomProfilesVer(v => v + 1);
+                }} style={{padding:"6px 16px",fontSize:10,background:"#0a0a1a",border:"1px solid #8844ff66",color:"#8844ff",borderRadius:3,cursor:mvrSelected.size>0?"pointer":"not-allowed",letterSpacing:1,fontWeight:"bold",opacity:mvrSelected.size>0?1:0.5}}>
+                  IMPORT {mvrSelected.size > 0 ? mvrSelected.size + " " : ""}SELECTED
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* RDM Discovery Results Dialog */}
       {rdmDialogOpen && (
         <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10004,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setRdmDialogOpen(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #ff884444",borderRadius:8,width:720,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,0.8)",display:"flex",flexDirection:"column"}}>
             <div style={{display:"flex",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #1e222a"}}>
-              <span style={{fontSize:12,fontWeight:"bold",color:"#ff8844",letterSpacing:2}}>📡 RDM DEVICES FOUND</span>
-              <span style={{marginLeft:8,fontSize:10,color:"#666"}}>{rdmDevices.length} device{rdmDevices.length!==1?"s":""}</span>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#ff8844",letterSpacing:2}}>{rdmDevices.length > 0 ? "📡 RDM DEVICES FOUND" : "📡 NETWORK SCAN"}</span>
+              <span style={{marginLeft:8,fontSize:10,color:"#666"}}>{rdmDevices.length > 0 ? `${rdmDevices.length} device${rdmDevices.length!==1?"s":""}` : `${rdmNodes.length} node${rdmNodes.length!==1?"s":""} found`}</span>
               <div style={{marginLeft:"auto",display:"flex",gap:8}}>
                 <button onClick={()=>setRdmSelected(new Set(rdmDevices.map(d=>d.uid)))} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>SELECT ALL</button>
                 <button onClick={()=>setRdmSelected(new Set())} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>DESELECT</button>
@@ -2650,7 +2817,32 @@ function LightingTimeline() {
               <span style={{width:100}}>PERSONALITY</span>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"4px 16px 8px",maxHeight:"50vh"}}>
-              {rdmDevices.length === 0 && <div style={{padding:20,textAlign:"center",fontSize:11,color:"#444"}}>No RDM devices found on scanned universes</div>}
+              {rdmDevices.length === 0 && (
+                <div style={{padding:16,textAlign:"center"}}>
+                  <div style={{fontSize:11,color:"#666",marginBottom:12}}>No RDM fixtures found on scanned universes</div>
+                  {rdmNodes.length > 0 && (
+                    <div style={{textAlign:"left",background:"#0a0e14",border:"1px solid #1e222a",borderRadius:6,padding:12}}>
+                      <div style={{fontSize:9,color:"#4488ff",letterSpacing:1,marginBottom:8,fontWeight:"bold"}}>ARTNET NODES ON NETWORK ({rdmNodes.length})</div>
+                      {rdmNodes.map((node, i) => (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderTop:i>0?"1px solid #1a1d22":"none"}}>
+                          <span style={{fontSize:10,color:"#44ffaa",fontFamily:"monospace",width:80}}>{node.ip}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:10,color:"#ddd"}}>{node.shortName || node.longName || "Unknown"}</div>
+                            <div style={{fontSize:8,color:"#555"}}>{node.longName && node.longName !== node.shortName ? node.longName : ""} {node.numPorts > 0 ? `• ${node.numPorts} port${node.numPorts>1?"s":""}` : ""} {node.universes.length > 0 ? `• Uni: ${node.universes.join(",")}` : ""}</div>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{fontSize:8,color:"#555",marginTop:8,lineHeight:"14px"}}>
+                        These nodes are sending/receiving ArtNet but have no RDM-capable fixtures.<br/>
+                        RDM requires: ArtNet gateway → DMX cable → RDM fixture
+                      </div>
+                    </div>
+                  )}
+                  {rdmNodes.length === 0 && (
+                    <div style={{fontSize:9,color:"#553333",marginTop:4}}>No ArtNet nodes responded on the network</div>
+                  )}
+                </div>
+              )}
               {rdmDevices.map(dev => {
                 const sel = rdmSelected.has(dev.uid);
                 return (
@@ -2838,7 +3030,34 @@ function LightingTimeline() {
                   setRdmProgress({ universe: 0, phase: 'starting', found: 0, total: universeList.length });
                 }
               }} style={{flex:1,padding:"6px 0",fontSize:10,background:rdmDiscovering?"#2a1a0a":"#1a0a00",border:"1px solid #ff884444",color:rdmDiscovering?"#886644":"#ff8844",borderRadius:3,cursor:rdmDiscovering?"wait":"pointer",letterSpacing:1,fontWeight:"bold",opacity:rdmDiscovering?0.6:1}}>
-                {rdmDiscovering ? (rdmProgress ? `📡 SCANNING U${rdmProgress.universe}...` : "📡 SCANNING...") : "📡 RDM DISCOVER"}
+                {rdmDiscovering ? (rdmProgress ? (rdmProgress.phase === 'polling' ? "📡 POLLING NETWORK..." : `📡 SCANNING U${rdmProgress.universe}...`) : "📡 SCANNING...") : "📡 RDM DISCOVER"}
+              </button>
+              <button onClick={()=>{
+                // Preload fixture library for profile matching
+                if (!fixtureLibraryData) {
+                  fetch('/fixture-library.json').then(r=>r.json()).then(data=>setFixtureLibraryData(data)).catch(()=>{});
+                }
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.mvr';
+                input.onchange = async (e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  setMvrLoading(true);
+                  try {
+                    const resp = await fetch('/api/parse-mvr', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+                    const data = await resp.json();
+                    if (!data.ok) { alert('MVR error: ' + data.error); return; }
+                    setMvrFixtures(data.fixtures);
+                    setMvrSelected(new Set(data.fixtures.map(f => f.uuid)));
+                    setMvrPositions({});
+                    setMvrDialogOpen(true);
+                  } catch (err) { alert('MVR import failed: ' + err.message); }
+                  finally { setMvrLoading(false); }
+                };
+                input.click();
+              }} style={{flex:1,padding:"6px 0",fontSize:10,background:mvrLoading?"#1a0a2a":"#0a0a1a",border:"1px solid #8844ff44",color:mvrLoading?"#664488":"#8844ff",borderRadius:3,cursor:mvrLoading?"wait":"pointer",letterSpacing:1,fontWeight:"bold",opacity:mvrLoading?0.6:1}}>
+                {mvrLoading ? "📦 PARSING..." : "📦 IMPORT MVR"}
               </button>
               <button onClick={()=>{
                 setDmxPatch(prev => {

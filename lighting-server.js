@@ -4,6 +4,7 @@ const path = require('path');
 const dgram = require('dgram');
 const os = require('os');
 const WebSocket = require('ws');
+const AdmZip = require('adm-zip');
 
 const PORT = 3457;
 const ARTNET_PORT = 6454;
@@ -50,6 +51,146 @@ let inputConfig = {
   sourceIP: null,        // null = accept from any, or specific IP string
   forwardToClient: false // send dmx_input to client for monitoring
 };
+
+// --- MVR (My Virtual Rig) Parser ---
+function parseMvrMatrix(matrixStr) {
+  // MVR matrix format: {1,0,0,0}{0,1,0,0}{0,0,1,0}{x,y,z,1}
+  if (!matrixStr) return { x: 0, y: 0, z: 0 };
+  const rows = matrixStr.match(/\{([^}]+)\}/g);
+  if (!rows || rows.length < 4) return { x: 0, y: 0, z: 0 };
+  const vals = rows[3].replace(/[{}]/g, '').split(',').map(Number);
+  return { x: vals[0] || 0, y: vals[1] || 0, z: vals[2] || 0 };
+}
+
+function mapPositionFrom3D(pos) {
+  // pos = { x, y, z } in mm (MVR coords: X=left/right, Y=depth, Z=height)
+  const z = pos.z;
+  const y = pos.y;
+  const absX = Math.abs(pos.x);
+
+  // Side: extreme left/right at any height
+  if (absX > 6000) return 'SIDE';
+  // Floor: very low
+  if (z < 500) return 'FLOOR';
+  // High positions (above 3m)
+  if (z >= 3000) {
+    if (y < -2000) return 'FRONT 1';   // high + far downstage
+    if (y < 0) return 'FRONT 2';        // high + somewhat front
+    if (y > 4000) return 'BACK';        // high + far upstage
+    if (y > 2000) return 'TOP BACK';    // high + mid upstage
+    return 'TOP';                        // high + center
+  }
+  // Mid height
+  if (y < 0) return 'FRONT 1';          // mid height, front of house
+  if (y > 4000) return 'BACK';          // mid height, far upstage
+  return 'CUSTOM';
+}
+
+function getXmlTagContent(xml, tag) {
+  const re = new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>', 'i');
+  const m = xml.match(re);
+  return m ? m[1].trim() : '';
+}
+
+function getXmlAttr(tag, attr) {
+  const re = new RegExp(attr + '\\s*=\\s*"([^"]*)"', 'i');
+  const m = tag.match(re);
+  return m ? m[1] : '';
+}
+
+function parseMvrXml(xmlStr) {
+  const fixtures = [];
+  const seenUuids = new Set();
+
+  function parseFixtureTag(attrs, inner, layer, group) {
+    const name = getXmlAttr(attrs, 'name');
+    const uuid = getXmlAttr(attrs, 'uuid') || `mvr-${fixtures.length}`;
+    if (seenUuids.has(uuid)) return; // skip duplicates
+    seenUuids.add(uuid);
+
+    const gdtfSpec = getXmlTagContent(inner, 'GDTFSpec');
+    const gdtfMode = getXmlTagContent(inner, 'GDTFMode');
+    const fixtureId = getXmlTagContent(inner, 'FixtureID');
+    const customId = getXmlTagContent(inner, 'CustomId') || getXmlTagContent(inner, 'CustomID');
+
+    // Parse address: format "Universe.Address" (1-indexed) or just number
+    let universe = 1, address = 1;
+    const addrMatch = inner.match(/<Address[^>]*>([^<]+)<\/Address>/i);
+    if (addrMatch) {
+      const addrStr = addrMatch[1].trim();
+      if (addrStr.includes('.')) {
+        const parts = addrStr.split('.');
+        universe = parseInt(parts[0]) || 1;
+        address = parseInt(parts[1]) || 1;
+      } else {
+        address = parseInt(addrStr) || 1;
+      }
+    }
+
+    // Parse matrix for position
+    const matrixStr = getXmlTagContent(inner, 'Matrix');
+    const pos3d = parseMvrMatrix(matrixStr);
+    const mappedPosition = mapPositionFrom3D(pos3d);
+
+    // Parse manufacturer/model from GDTFSpec (format: Manufacturer@Model@Version)
+    const specParts = gdtfSpec.split('@');
+    const manufacturer = (specParts[0] || '').replace(/_/g, ' ');
+    const model = (specParts[1] || '').replace(/_/g, ' ');
+
+    fixtures.push({
+      name: name || model || 'Fixture',
+      uuid,
+      gdtfSpec, gdtfMode, manufacturer, model,
+      universe, address, fixtureId, customId,
+      position: pos3d, mappedPosition,
+      layer: layer || '', group: group || ''
+    });
+  }
+
+  // Recursive: extract fixtures, then recurse into GroupObjects
+  function extractFromNode(xml, layer, group) {
+    // First, find all GroupObject blocks and their ranges to exclude from top-level fixture search
+    const groupBlocks = [];
+    const groupRe = /<GroupObject\b([^>]*)>([\s\S]*?)<\/GroupObject>/gi;
+    let gm;
+    while ((gm = groupRe.exec(xml)) !== null) {
+      groupBlocks.push({ start: gm.index, end: gm.index + gm[0].length, attrs: gm[1], inner: gm[2] });
+    }
+
+    // Find fixtures NOT inside a GroupObject (top-level in this node)
+    const fixtureRe = /<Fixture\b([^>]*)>([\s\S]*?)<\/Fixture>/gi;
+    let fm;
+    while ((fm = fixtureRe.exec(xml)) !== null) {
+      // Check if this fixture is inside a GroupObject
+      const pos = fm.index;
+      const insideGroup = groupBlocks.some(g => pos > g.start && pos < g.end);
+      if (!insideGroup) {
+        parseFixtureTag(fm[1], fm[2], layer, group);
+      }
+    }
+
+    // Recurse into GroupObjects
+    for (const g of groupBlocks) {
+      const gName = getXmlAttr(g.attrs, 'name');
+      extractFromNode(g.inner, layer, gName || group);
+    }
+  }
+
+  // Find all layers
+  const layerRe = /<Layer\b([^>]*)>([\s\S]*?)<\/Layer>/gi;
+  let lm;
+  while ((lm = layerRe.exec(xmlStr)) !== null) {
+    const layerName = getXmlAttr(lm[1], 'name');
+    extractFromNode(lm[2], layerName, '');
+  }
+
+  // If no layers found, try parsing from root
+  if (fixtures.length === 0) {
+    extractFromNode(xmlStr, '', '');
+  }
+
+  return fixtures;
+}
 
 // --- Network Interface Discovery ---
 function getNetworkInterfaces() {
@@ -215,6 +356,47 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- MVR Import ---
+  if (req.url === '/api/parse-mvr' && req.method === 'POST') {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        const zip = new AdmZip(buffer);
+        const entries = zip.getEntries();
+
+        // Find GeneralSceneDescription.xml
+        const xmlEntry = entries.find(e =>
+          e.entryName === 'GeneralSceneDescription.xml' ||
+          e.entryName.endsWith('/GeneralSceneDescription.xml')
+        );
+        if (!xmlEntry) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'No GeneralSceneDescription.xml found in MVR file' }));
+          return;
+        }
+
+        const xmlStr = xmlEntry.getData().toString('utf8');
+        const fixtures = parseMvrXml(xmlStr);
+
+        // List GDTF files present
+        const gdtfFiles = entries
+          .filter(e => e.entryName.toLowerCase().endsWith('.gdtf'))
+          .map(e => e.entryName);
+
+        console.log(`[MVR] Parsed ${fixtures.length} fixture(s), ${gdtfFiles.length} GDTF file(s)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, fixtures, gdtfFiles }));
+      } catch (e) {
+        console.error('[MVR] Parse error:', e.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Failed to parse MVR: ' + e.message }));
+      }
+    });
+    return;
+  }
+
   // Serve fixture library JSON
   if (req.url === '/fixture-library.json') {
     fs.readFile(fixtureLibraryPath, (err, data) => {
@@ -320,6 +502,47 @@ function buildSACNPacket(universe, dmxData) {
   return buf;
 }
 
+// --- ArtPoll / ArtPollReply ---
+const OP_POLL       = 0x2000;
+const OP_POLL_REPLY = 0x2100;
+
+function buildArtPoll() {
+  const buf = Buffer.alloc(14);
+  buf.write('Art-Net\0', 0, 8, 'ascii');
+  buf.writeUInt16LE(OP_POLL, 8);
+  buf[10] = 0x00; buf[11] = 0x0E; // protocol version 14
+  buf[12] = 0x00; // TalkToMe: no diagnostics
+  buf[13] = 0x00; // Priority
+  return buf;
+}
+
+function parseArtPollReply(buf) {
+  if (buf.length < 207) return null;
+  try {
+    const ip = `${buf[10]}.${buf[11]}.${buf[12]}.${buf[13]}`;
+    const port = buf.readUInt16LE(14);
+    const versionH = buf[16]; const versionL = buf[17];
+    const netSwitch = buf[18];
+    const subSwitch = buf[19];
+    const shortName = buf.toString('ascii', 26, 44).replace(/\0+$/, '');
+    const longName = buf.toString('ascii', 44, 108).replace(/\0+$/, '');
+    const numPorts = buf.readUInt16BE(172);
+    // Port types at 174-177, goodInput at 178-181, goodOutput at 182-185
+    // SwOut (universe per port) at 190-193
+    const universes = [];
+    for (let p = 0; p < Math.min(numPorts, 4); p++) {
+      const portType = buf[174 + p];
+      const isOutput = (portType & 0x80) !== 0; // can output DMX
+      if (isOutput) {
+        const swOut = buf[190 + p];
+        const uni = (netSwitch << 8) | (subSwitch << 4) | swOut;
+        universes.push(uni + 1); // convert to 1-indexed
+      }
+    }
+    return { ip, port, shortName, longName, numPorts, universes, version: `${versionH}.${versionL}` };
+  } catch(e) { return null; }
+}
+
 // --- RDM over ArtNet ---
 // ArtNet RDM opcodes (little-endian in packet)
 const OP_TOD_REQUEST = 0x8000;
@@ -347,6 +570,7 @@ let rdmDiscovering = false;
 let rdmTransactionNum = 0;
 let rdmPendingResolve = null;
 let rdmPendingTimeout = null;
+let rdmArtPollNodes = [];  // ArtPollReply nodes found during discovery
 
 // Build ArtTodRequest — request Table of Devices for a universe
 function buildArtTodRequest(universe) {
@@ -555,13 +779,35 @@ async function rdmGetPID(universe, destUID, gatewayIP, pid, paramData) {
 async function rdmDiscover(universes) {
   if (rdmDiscovering) return [];
   rdmDiscovering = true;
+  rdmArtPollNodes = []; // reset discovered nodes
   console.log('[RDM] Starting discovery on universes:', universes);
 
   // Ensure input socket is active to receive RDM responses
   startInputSocket();
 
   const allDevices = [];
-  const destIP = clientConfig.artnetHost || '255.255.255.255';
+  // RDM discovery MUST broadcast — don't use artnetHost which may be unicast/localhost
+  // Use the broadcast address for the output NIC, or global broadcast as fallback
+  let destIP = '255.255.255.255';
+  const nics = getNetworkInterfaces();
+  if (networkConfig.outputIP && networkConfig.outputIP !== '0.0.0.0') {
+    // Use broadcast for the configured output NIC
+    const outNic = nics.find(n => n.ip === networkConfig.outputIP);
+    if (outNic && outNic.broadcast) destIP = outNic.broadcast;
+  } else {
+    // No specific output NIC — try to find the 2.x.x.x NIC broadcast
+    const ethNic = nics.find(n => n.ip.startsWith('2.'));
+    if (ethNic && ethNic.broadcast) destIP = ethNic.broadcast;
+  }
+  console.log('[RDM] Broadcasting discovery to:', destIP, '(artnetHost:', clientConfig.artnetHost, ')');
+
+  // Phase 0: Send ArtPoll to discover all ArtNet nodes on the network
+  broadcastToClients({ type: 'rdm_progress', universe: 0, phase: 'polling', found: 0, total: universes.length });
+  const pollPkt = buildArtPoll();
+  artnetSocket.send(pollPkt, 0, pollPkt.length, ARTNET_PORT, destIP);
+  await new Promise(r => setTimeout(r, 1500)); // wait for ArtPollReply responses
+  console.log(`[RDM] ArtPoll: found ${rdmArtPollNodes.length} node(s) on network`);
+  rdmArtPollNodes.forEach(n => console.log(`[RDM]   Node: ${n.ip} "${n.shortName}" "${n.longName}" ports=${n.numPorts} uni=[${n.universes}]`));
 
   for (const uni of universes) {
     broadcastToClients({ type: 'rdm_progress', universe: uni, phase: 'discovering', found: 0, total: universes.length });
@@ -646,8 +892,8 @@ async function rdmDiscover(universes) {
   }
 
   rdmDiscovering = false;
-  console.log(`[RDM] Discovery complete: ${allDevices.length} device(s) found`);
-  return allDevices;
+  console.log(`[RDM] Discovery complete: ${allDevices.length} device(s) found, ${rdmArtPollNodes.length} node(s) on network`);
+  return { devices: allDevices, nodes: rdmArtPollNodes };
 }
 
 // --- ArtNet Input Parser ---
@@ -672,11 +918,30 @@ const forwardTimers = {};
 const FORWARD_INTERVAL = 100;
 
 function onArtNetInput(buf, rinfo) {
-  // Route RDM packets regardless of input config (discovery is independent)
+  // Route RDM / ArtPollReply packets regardless of input config (discovery is independent)
   if (buf.length >= 12 && buf.toString('ascii', 0, 7) === 'Art-Net') {
     const op = buf.readUInt16LE(8);
+    if (rdmDiscovering && op !== 0x5000) {
+      // During discovery, log non-DMX ArtNet opcodes for debugging
+      console.log(`[RDM DEBUG] Received opcode 0x${op.toString(16).padStart(4,'0')} from ${rinfo.address}:${rinfo.port} (${buf.length} bytes)`);
+    }
     if (op === OP_TOD_DATA || op === OP_RDM) {
+      console.log(`[RDM] Got RDM response (0x${op.toString(16)}) from ${rinfo.address}`);
       handleRdmPacket(buf, rinfo);
+      return;
+    }
+    if (op === OP_POLL_REPLY) {
+      // Collect ArtPollReply during discovery
+      const nodeInfo = parseArtPollReply(buf);
+      if (nodeInfo && rdmDiscovering) {
+        // Don't log our own reply
+        if (!localAddresses.has(rinfo.address)) {
+          console.log(`[RDM] ArtPollReply from ${rinfo.address}: "${nodeInfo.shortName}" / "${nodeInfo.longName}" ports=${nodeInfo.numPorts} uni=[${nodeInfo.universes}]`);
+          if (!rdmArtPollNodes.find(n => n.ip === rinfo.address)) {
+            rdmArtPollNodes.push({ ...nodeInfo, ip: rinfo.address });
+          }
+        }
+      }
       return;
     }
   }
@@ -960,12 +1225,12 @@ wss.on('connection', (ws) => {
         } else {
           const universes = msg.universes || [1];
           console.log('[RDM] Discovery requested for universes:', universes);
-          rdmDiscover(universes).then(devices => {
-            broadcastToClients({ type: 'rdm_results', devices });
+          rdmDiscover(universes).then(result => {
+            broadcastToClients({ type: 'rdm_results', devices: result.devices, nodes: result.nodes });
           }).catch(err => {
             console.error('[RDM] Discovery error:', err.message);
             rdmDiscovering = false;
-            broadcastToClients({ type: 'rdm_results', devices: [], error: err.message });
+            broadcastToClients({ type: 'rdm_results', devices: [], nodes: [], error: err.message });
           });
         }
       }
