@@ -1267,6 +1267,7 @@ function LightingTimeline() {
   const [libSelectedFx, setLibSelectedFx] = useState(null);
   const [libSelectedMode, setLibSelectedMode] = useState(0);
   const [libAddCount, setLibAddCount] = useState(1);
+  const [libQtyKeypad, setLibQtyKeypad] = useState(null); // {value, dirty, rect}
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -2328,7 +2329,7 @@ function LightingTimeline() {
                 if(!fixtureLibraryData){
                   fetch('/fixture-library.json').then(r=>r.json()).then(data=>{setFixtureLibraryData(data);}).catch(e=>alert("Failed to load fixture library"));
                 }
-                setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);setLibAddCount(1);
+                setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);setLibAddCount(1);setLibQtyKeypad(null);
                 setFixtureLibraryOpen(true);
               }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a0a",border:"1px solid #ffaa4444",color:"#ffaa44",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>LIBRARY</button>
               <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
@@ -2619,9 +2620,32 @@ function LightingTimeline() {
                     {/* Add button with quantity */}
                     <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a",display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:9,color:"#888",letterSpacing:1}}>QTY</span>
-                      <input type="number" min={1} max={64} value={libAddCount} onChange={e=>setLibAddCount(Math.max(1,Math.min(64,+e.target.value||1)))} style={{width:48,background:"#080a0e",border:"1px solid #44ffaa33",color:"#44ffaa",borderRadius:3,padding:"6px 4px",fontSize:13,textAlign:"center",fontFamily:"monospace",fontWeight:"bold"}}/>
+                      <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setLibQtyKeypad({value:String(libAddCount),dirty:false,rect:{top:r.top,left:r.left}});}} style={{width:48,background:"#080a0e",border:"1px solid #44ffaa33",color:"#44ffaa",borderRadius:3,padding:"6px 4px",fontSize:13,textAlign:"center",fontFamily:"monospace",fontWeight:"bold",cursor:"pointer",userSelect:"none"}}>{libAddCount}</div>
                       <button onClick={addToProfiles} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD {libAddCount > 1 ? libAddCount + ' FIXTURES' : 'FIXTURE'}</button>
                     </div>
+                    {/* QTY Keypad */}
+                    {libQtyKeypad && (
+                      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10004}} onClick={()=>setLibQtyKeypad(null)}>
+                        <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(libQtyKeypad.rect.top - 260, window.innerHeight-260),left:Math.min(libQtyKeypad.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #44ffaa66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                            <span style={{fontSize:8,color:"#44ffaa88",letterSpacing:1}}>QUANTITY</span>
+                          </div>
+                          <div style={{background:"#080a0e",border:"1px solid #44ffaa44",borderRadius:3,padding:"6px 8px",fontSize:16,color:libQtyKeypad.dirty?"#44ffaa":"#44ffaa66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{libQtyKeypad.value || '0'}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+                            {[1,2,3,4,5,6,7,8,9].map(d => (
+                              <button key={d} onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+d}):({...prev,value:String(d),dirty:true}))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                            ))}
+                            <div/>
+                            <button onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+'0'}):({...prev,value:'0',dirty:true}))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:prev.value.slice(0,-1)}))} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:'',dirty:true}))} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                            <button onClick={()=>{if(libQtyKeypad.dirty){const v=Math.max(1,Math.min(64,parseInt(libQtyKeypad.value)||1));setLibAddCount(v);}setLibQtyKeypad(null);}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </React.Fragment>
                 )}
               </div>
