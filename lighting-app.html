@@ -41,22 +41,39 @@ const PARAM_GROUPS = [
     { id:"tilt", label:"Tilt", unit:"\u00B0", min:0, max:270, color:"#66ccff" },
   ]},
   { group:"COLOR", color:"#ff66aa", params:[
+    { id:"red", label:"Red", unit:"%", min:0, max:100, color:"#ff4444" },
+    { id:"green", label:"Green", unit:"%", min:0, max:100, color:"#44ff44" },
+    { id:"blue", label:"Blue", unit:"%", min:0, max:100, color:"#4488ff" },
     { id:"cyan", label:"C", unit:"%", min:0, max:100, color:"#44ffff" },
     { id:"magenta", label:"M", unit:"%", min:0, max:100, color:"#ff44ff" },
     { id:"yellow", label:"Y", unit:"%", min:0, max:100, color:"#ffff44" },
     { id:"white", label:"W", unit:"%", min:0, max:100, color:"#eeeedd" },
+    { id:"amber", label:"Amber", unit:"%", min:0, max:100, color:"#ffaa22" },
+    { id:"uv", label:"UV", unit:"%", min:0, max:100, color:"#8844ff" },
+    { id:"warm_white", label:"WW", unit:"%", min:0, max:100, color:"#ffddaa" },
+    { id:"cool_white", label:"CW", unit:"%", min:0, max:100, color:"#ccddff" },
+    { id:"lime", label:"Lime", unit:"%", min:0, max:100, color:"#aaff44" },
+    { id:"indigo", label:"Indigo", unit:"%", min:0, max:100, color:"#4400cc" },
+    { id:"cto", label:"CTO", unit:"%", min:0, max:100, color:"#ffbb66" },
     { id:"colorwheel", label:"Color", unit:"slot", min:0, max:16, color:"#ff88cc" },
   ]},
   { group:"BEAM", color:"#ffaa44", params:[
     { id:"zoom", label:"Zoom", unit:"\u00B0", min:5, max:60, color:"#ffaa44" },
     { id:"iris", label:"Iris", unit:"%", min:0, max:100, color:"#ffbb55" },
     { id:"focus", label:"Focus", unit:"%", min:0, max:100, color:"#ffcc66" },
+    { id:"frost", label:"Frost", unit:"%", min:0, max:100, color:"#aaddff" },
+    { id:"prism", label:"Prism", unit:"slot", min:0, max:8, color:"#ff66dd" },
+    { id:"prism_rot", label:"Prism Rot", unit:"\u00B0", min:0, max:360, color:"#ff88ee" },
   ]},
   { group:"BLADES", color:"#aa66ff", params:[
     { id:"blade_a", label:"Blade A", unit:"%", min:0, max:100, color:"#aa66ff" },
+    { id:"blade_a_rot", label:"Blade A Rot", unit:"°", min:0, max:360, color:"#aa77ff" },
     { id:"blade_b", label:"Blade B", unit:"%", min:0, max:100, color:"#bb77ff" },
+    { id:"blade_b_rot", label:"Blade B Rot", unit:"°", min:0, max:360, color:"#bb88ff" },
     { id:"blade_c", label:"Blade C", unit:"%", min:0, max:100, color:"#cc88ff" },
+    { id:"blade_c_rot", label:"Blade C Rot", unit:"°", min:0, max:360, color:"#cc99ff" },
     { id:"blade_d", label:"Blade D", unit:"%", min:0, max:100, color:"#dd99ff" },
+    { id:"blade_d_rot", label:"Blade D Rot", unit:"°", min:0, max:360, color:"#ddaaff" },
     { id:"blade_rot", label:"Blade Rot", unit:"°", min:0, max:360, color:"#ee99ff" },
   ]},
   { group:"GOBO", color:"#44ffaa", params:[
@@ -1242,6 +1259,13 @@ function LightingTimeline() {
   const [builderParams, setBuilderParams] = useState([]);
   const [builderEditName, setBuilderEditName] = useState(null); // non-null = editing existing
   const [customProfilesVer, setCustomProfilesVer] = useState(0); // force re-render on save
+  // Fixture Library browser
+  const [fixtureLibraryOpen, setFixtureLibraryOpen] = useState(false);
+  const [fixtureLibraryData, setFixtureLibraryData] = useState(null); // {manufacturers, fixtures}
+  const [libSearch, setLibSearch] = useState("");
+  const [libSelectedMfr, setLibSelectedMfr] = useState(null);
+  const [libSelectedFx, setLibSelectedFx] = useState(null);
+  const [libSelectedMode, setLibSelectedMode] = useState(0);
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -2299,6 +2323,13 @@ function LightingTimeline() {
             <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
               <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
               <button onClick={()=>{setBuilderEditName(null);setBuilderName("");setBuilderColor("#ff5544");setBuilderParams([]);setFixtureBuilderOpen(true);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a0a1a",border:"1px solid #ff44ff44",color:"#ff44ff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>⚡ BUILD TYPE</button>
+              <button onClick={()=>{
+                if(!fixtureLibraryData){
+                  fetch('/fixture-library.json').then(r=>r.json()).then(data=>{setFixtureLibraryData(data);}).catch(e=>alert("Failed to load fixture library"));
+                }
+                setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);
+                setFixtureLibraryOpen(true);
+              }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a0a",border:"1px solid #ffaa4444",color:"#ffaa44",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>LIBRARY</button>
               <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
             </div>
             {keypadState && keypadState.field==='fixture_dmx' && (() => {
@@ -2452,6 +2483,135 @@ function LightingTimeline() {
               <span style={{flex:1}}/>
               <button onClick={()=>setFixtureBuilderOpen(false)} style={{padding:"6px 16px",fontSize:10,background:"#1a1a1a",border:"1px solid #33333344",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CANCEL</button>
               <button onClick={saveProfile} style={{padding:"6px 16px",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>💾 SAVE</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Fixture Library Browser Modal */}
+      {fixtureLibraryOpen && (() => {
+        const lib = fixtureLibraryData;
+        if (!lib) return <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:10003,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:"#ffaa44",fontSize:14}}>Loading library...</div></div>;
+        const searchLower = libSearch.toLowerCase();
+        // Filter manufacturers by search
+        const mfrKeys = Object.keys(lib.manufacturers).filter(k => {
+          if (!searchLower) return true;
+          if (lib.manufacturers[k].name.toLowerCase().includes(searchLower)) return true;
+          // Also match if any fixture from this manufacturer matches
+          return lib.fixtures.some(f => f.manufacturer === k && f.name.toLowerCase().includes(searchLower));
+        }).sort((a,b) => lib.manufacturers[a].name.localeCompare(lib.manufacturers[b].name));
+        // Filter fixtures for selected manufacturer (or all if searching)
+        let visibleFixtures = [];
+        if (libSelectedMfr) {
+          visibleFixtures = lib.fixtures.filter(f => f.manufacturer === libSelectedMfr);
+          if (searchLower) visibleFixtures = visibleFixtures.filter(f => f.name.toLowerCase().includes(searchLower));
+        } else if (searchLower) {
+          visibleFixtures = lib.fixtures.filter(f => f.name.toLowerCase().includes(searchLower) || lib.manufacturers[f.manufacturer]?.name.toLowerCase().includes(searchLower));
+        }
+        const selFxObj = libSelectedFx ? visibleFixtures.find(f => f.name === libSelectedFx) : null;
+        const selMode = selFxObj ? (selFxObj.modes[libSelectedMode] || selFxObj.modes[0]) : null;
+        const addToProfiles = () => {
+          if (!selFxObj || !selMode) return;
+          // Build a short but descriptive profile name
+          const baseName = selFxObj.shortName
+            ? selFxObj.shortName.toUpperCase().replace(/[^A-Z0-9]/g,'_')
+            : ((lib.manufacturers[selFxObj.manufacturer]?.name || '').toUpperCase().replace(/[^A-Z0-9]/g,'_') + '_' + selFxObj.name.toUpperCase().replace(/[^A-Z0-9]/g,'_'));
+          const modeSuffix = selFxObj.modes.length > 1 ? '_' + selMode.channels + 'CH' : '';
+          let profileName = (baseName + modeSuffix).replace(/_+/g,'_').replace(/^_|_$/g,'');
+          if (profileName.length > 32) profileName = profileName.slice(0, 32).replace(/_$/, '');
+          // Create the profile
+          const prof = { channels: selMode.channels, map: selMode.map, color: "#ffaa44" };
+          DMX_PROFILES[profileName] = { channels: prof.channels, map: prof.map };
+          TYPE_COLORS[profileName] = prof.color;
+          let custom = {};
+          try { custom = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
+          custom[profileName] = prof;
+          localStorage.setItem("lumina-custom-profiles", JSON.stringify(custom));
+          setCustomProfilesVer(v => v + 1);
+          setFixtureLibraryOpen(false);
+        };
+        return (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:10003,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureLibraryOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #ffaa4444",borderRadius:8,width:780,height:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
+            {/* Header */}
+            <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a",gap:8}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#ffaa44",letterSpacing:2}}>FIXTURE LIBRARY</span>
+              <span style={{fontSize:9,color:"#555"}}>{lib.fixtures.length} fixtures</span>
+              <span style={{flex:1}}/>
+              <input type="text" value={libSearch} onChange={e=>{setLibSearch(e.target.value);setLibSelectedFx(null);setLibSelectedMode(0);}} placeholder="Search manufacturer or fixture..." style={{width:220,background:"#080a0e",border:"1px solid #ffaa4433",color:"#ddd",borderRadius:3,padding:"5px 8px",fontSize:10}}/>
+              <button onClick={()=>setFixtureLibraryOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
+            </div>
+            {/* Body: 3-column layout */}
+            <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+              {/* Left: Manufacturers */}
+              <div style={{width:180,borderRight:"1px solid #1a1d22",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"6px 10px",fontSize:8,color:"#555",letterSpacing:1,borderBottom:"1px solid #1a1d22"}}>MANUFACTURERS ({mfrKeys.length})</div>
+                <div style={{flex:1,overflowY:"auto"}}>
+                  {mfrKeys.map(k => {
+                    const mfr = lib.manufacturers[k];
+                    const count = lib.fixtures.filter(f=>f.manufacturer===k).length;
+                    return <div key={k} onClick={()=>{setLibSelectedMfr(k);setLibSelectedFx(null);setLibSelectedMode(0);}} style={{padding:"5px 10px",fontSize:10,color:libSelectedMfr===k?"#ffaa44":"#999",background:libSelectedMfr===k?"#ffaa4411":"transparent",cursor:"pointer",borderBottom:"1px solid #0e1018",display:"flex",justifyContent:"space-between",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=libSelectedMfr===k?"#ffaa4418":"#ffffff08"} onMouseLeave={e=>e.currentTarget.style.background=libSelectedMfr===k?"#ffaa4411":"transparent"}>
+                      <span style={{fontWeight:libSelectedMfr===k?"bold":"normal"}}>{mfr.name}</span>
+                      <span style={{fontSize:8,color:"#555"}}>{count}</span>
+                    </div>;
+                  })}
+                </div>
+              </div>
+              {/* Middle: Fixtures */}
+              <div style={{width:240,borderRight:"1px solid #1a1d22",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"6px 10px",fontSize:8,color:"#555",letterSpacing:1,borderBottom:"1px solid #1a1d22"}}>FIXTURES ({visibleFixtures.length})</div>
+                <div style={{flex:1,overflowY:"auto"}}>
+                  {visibleFixtures.length === 0 && <div style={{padding:16,textAlign:"center",fontSize:10,color:"#444"}}>{libSelectedMfr || searchLower ? "No fixtures found" : "Select a manufacturer"}</div>}
+                  {visibleFixtures.map(fx => (
+                    <div key={fx.manufacturer+'_'+fx.name} onClick={()=>{setLibSelectedFx(fx.name);setLibSelectedMode(0);}} style={{padding:"5px 10px",fontSize:10,color:libSelectedFx===fx.name?"#ffaa44":"#bbb",background:libSelectedFx===fx.name?"#ffaa4411":"transparent",cursor:"pointer",borderBottom:"1px solid #0e1018"}} onMouseEnter={e=>e.currentTarget.style.background=libSelectedFx===fx.name?"#ffaa4418":"#ffffff08"} onMouseLeave={e=>e.currentTarget.style.background=libSelectedFx===fx.name?"#ffaa4411":"transparent"}>
+                      <div style={{fontWeight:libSelectedFx===fx.name?"bold":"normal"}}>{fx.name}</div>
+                      <div style={{fontSize:8,color:"#555",marginTop:1}}>{fx.category} {"\u00B7"} {fx.modes.length > 1 ? `${fx.modes.length} modes` : `${fx.modes[0].channels}ch`}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Right: Details & Mode */}
+              <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+                {!selFxObj ? (
+                  <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#444",fontSize:11}}>Select a fixture to see details</div>
+                ) : (
+                  <React.Fragment>
+                    <div style={{padding:"10px 14px",borderBottom:"1px solid #1a1d22"}}>
+                      <div style={{fontSize:13,fontWeight:"bold",color:"#ffaa44"}}>{selFxObj.name}</div>
+                      <div style={{fontSize:9,color:"#777",marginTop:2}}>{lib.manufacturers[selFxObj.manufacturer]?.name} {"\u00B7"} {selFxObj.category}</div>
+                    </div>
+                    {/* Mode selector */}
+                    {selFxObj.modes.length > 1 && (
+                      <div style={{padding:"8px 14px",borderBottom:"1px solid #1a1d22",display:"flex",gap:4,flexWrap:"wrap"}}>
+                        <span style={{fontSize:8,color:"#555",letterSpacing:1,marginRight:4,alignSelf:"center"}}>MODE</span>
+                        {selFxObj.modes.map((m,i) => (
+                          <button key={i} onClick={()=>setLibSelectedMode(i)} style={{padding:"3px 8px",fontSize:9,background:libSelectedMode===i?"#ffaa4422":"#0c0e12",border:"1px solid "+(libSelectedMode===i?"#ffaa4466":"#252930"),color:libSelectedMode===i?"#ffaa44":"#888",borderRadius:3,cursor:"pointer",fontWeight:libSelectedMode===i?"bold":"normal"}}>{m.name} ({m.channels}ch)</button>
+                        ))}
+                      </div>
+                    )}
+                    {/* Channel map */}
+                    {selMode && (
+                      <div style={{flex:1,overflowY:"auto",padding:"8px 14px"}}>
+                        <div style={{fontSize:8,color:"#555",letterSpacing:1,marginBottom:6}}>CHANNEL MAP {"\u00B7"} {selMode.channels} CHANNELS</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                          {Object.entries(selMode.map).sort((a,b)=>a[1].offset-b[1].offset).map(([pid,{offset,bits}]) => {
+                            const p = ALL_PARAMS.find(pp=>pp.id===pid);
+                            return <div key={pid} style={{padding:"4px 8px",background:"#0a0c12",border:"1px solid "+(p?.color||"#555")+"44",borderRadius:3,fontSize:9,display:"flex",gap:6,alignItems:"center"}}>
+                              <span style={{color:p?.color||"#888",fontWeight:"bold"}}>{p?.label||pid}</span>
+                              <span style={{color:"#555",fontSize:8}}>ch{offset+1}{bits===16?"-"+(offset+2):""}</span>
+                            </div>;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {/* Add button */}
+                    <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a"}}>
+                      <button onClick={addToProfiles} style={{width:"100%",padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD TO PROFILES</button>
+                    </div>
+                  </React.Fragment>
+                )}
+              </div>
             </div>
           </div>
         </div>

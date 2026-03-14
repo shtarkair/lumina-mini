@@ -95,7 +95,25 @@ let monitorTick = 0;
 const MONITOR_EVERY = 4; // send monitor data every N merge ticks (~10Hz at 40Hz output)
 
 // --- HTTP Server ---
+const fixtureLibraryPath = path.join(__dirname, 'fixture-library.json');
 const server = http.createServer((req, res) => {
+  // Serve fixture library JSON
+  if (req.url === '/fixture-library.json') {
+    fs.readFile(fixtureLibraryPath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('Fixture library not found');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=86400'
+      });
+      res.end(data);
+    });
+    return;
+  }
+  // Default: serve the app
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(500);
