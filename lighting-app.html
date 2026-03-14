@@ -1290,6 +1290,12 @@ function LightingTimeline() {
   const [libFolderSavePicker, setLibFolderSavePicker] = useState(null); // {profileName} — save-to-folder popup in OFL view
   const [libFolderSelectedProfile, setLibFolderSelectedProfile] = useState(null); // selected profile name in folder view
   const saveUserFolders = (folders) => { setUserFolders(folders); localStorage.setItem("lumina-user-folders", JSON.stringify(folders)); };
+  // RDM Discovery state
+  const [rdmDiscovering, setRdmDiscovering] = useState(false);
+  const [rdmDevices, setRdmDevices] = useState([]);
+  const [rdmProgress, setRdmProgress] = useState(null);
+  const [rdmDialogOpen, setRdmDialogOpen] = useState(false);
+  const [rdmSelected, setRdmSelected] = useState(new Set());
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -1671,6 +1677,21 @@ function LightingTimeline() {
             if (msg.type === 'nic_list') {
               setNicList(msg.interfaces || []);
               if (msg.current) setNicConfig(msg.current);
+            }
+            if (msg.type === 'rdm_progress') {
+              setRdmProgress(msg);
+              setRdmDiscovering(true);
+            }
+            if (msg.type === 'rdm_results') {
+              setRdmDevices(msg.devices || []);
+              setRdmDiscovering(false);
+              setRdmProgress(null);
+              if ((msg.devices || []).length > 0) {
+                setRdmSelected(new Set(msg.devices.map(d => d.uid)));
+                setRdmDialogOpen(true);
+              } else {
+                setRdmDialogOpen(true); // show dialog with "no devices" message
+              }
             }
           } catch(e) {}
         };
@@ -2606,6 +2627,108 @@ function LightingTimeline() {
         </div>
       )}
 
+      {/* RDM Discovery Results Dialog */}
+      {rdmDialogOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10004,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setRdmDialogOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #ff884444",borderRadius:8,width:720,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,0.8)",display:"flex",flexDirection:"column"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #1e222a"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#ff8844",letterSpacing:2}}>📡 RDM DEVICES FOUND</span>
+              <span style={{marginLeft:8,fontSize:10,color:"#666"}}>{rdmDevices.length} device{rdmDevices.length!==1?"s":""}</span>
+              <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                <button onClick={()=>setRdmSelected(new Set(rdmDevices.map(d=>d.uid)))} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>SELECT ALL</button>
+                <button onClick={()=>setRdmSelected(new Set())} style={{padding:"3px 8px",fontSize:8,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>DESELECT</button>
+                <button onClick={()=>setRdmDialogOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+            <div style={{display:"flex",padding:"6px 16px",gap:4,borderBottom:"1px solid #1a1d22",fontSize:8,color:"#555",letterSpacing:1}}>
+              <span style={{width:24,textAlign:"center"}}>☑</span>
+              <span style={{width:36,textAlign:"center"}}>UNI</span>
+              <span style={{width:50,textAlign:"center"}}>ADDR</span>
+              <span style={{flex:1}}>MANUFACTURER / MODEL</span>
+              <span style={{width:120}}>LABEL</span>
+              <span style={{width:36,textAlign:"center"}}>CH</span>
+              <span style={{width:100}}>PERSONALITY</span>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"4px 16px 8px",maxHeight:"50vh"}}>
+              {rdmDevices.length === 0 && <div style={{padding:20,textAlign:"center",fontSize:11,color:"#444"}}>No RDM devices found on scanned universes</div>}
+              {rdmDevices.map(dev => {
+                const sel = rdmSelected.has(dev.uid);
+                return (
+                  <div key={dev.uid} onClick={()=>setRdmSelected(prev=>{const n=new Set(prev);if(n.has(dev.uid))n.delete(dev.uid);else n.add(dev.uid);return n;})} style={{display:"flex",alignItems:"center",gap:4,padding:"6px 0",borderTop:"1px solid #1a1d22",cursor:"pointer",opacity:sel?1:0.5}}>
+                    <span style={{width:24,textAlign:"center",fontSize:12,color:sel?"#ff8844":"#333"}}>{sel?"☑":"☐"}</span>
+                    <span style={{width:36,textAlign:"center",fontSize:10,color:"#4488ff"}}>{dev.universe}</span>
+                    <span style={{width:50,textAlign:"center",fontSize:10,color:"#44ffaa",fontFamily:"monospace"}}>{String(dev.dmxAddress).padStart(3,'0')}</span>
+                    <div style={{flex:1,overflow:"hidden"}}>
+                      <div style={{fontSize:10,color:"#ddd",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{dev.manufacturer} {dev.model}</div>
+                      <div style={{fontSize:7,color:"#555"}}>{dev.uid}</div>
+                    </div>
+                    <span style={{width:120,fontSize:10,color:"#aaa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dev.label||"—"}</span>
+                    <span style={{width:36,textAlign:"center",fontSize:10,color:"#ffaa44",fontWeight:"bold"}}>{dev.dmxFootprint}</span>
+                    <span style={{width:100,fontSize:9,color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dev.personalityName || `P${dev.personality}/${dev.personalityCount}`}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{padding:"10px 16px",borderTop:"1px solid #1e222a",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:9,color:"#666"}}>{rdmSelected.size} of {rdmDevices.length} selected</span>
+              <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                <button onClick={()=>setRdmDialogOpen(false)} style={{padding:"6px 16px",fontSize:10,background:"none",border:"1px solid #333",color:"#888",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CANCEL</button>
+                <button onClick={()=>{
+                  if (rdmSelected.size === 0) return;
+                  const selectedDevices = rdmDevices.filter(d => rdmSelected.has(d.uid));
+                  const maxId = fixtures.reduce((m,f) => Math.max(m, f.id), 0);
+                  const newFixtures = [];
+                  const newPatch = {...dmxPatch};
+                  selectedDevices.forEach((dev, idx) => {
+                    const fxId = maxId + 1 + idx;
+                    // Try to match to existing profile by channel count
+                    let profileName = null;
+                    const allProfiles = Object.keys(DMX_PROFILES).filter(p => !hiddenProfiles.has(p));
+                    // First try exact model match
+                    const modelKey = (dev.model || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                    if (modelKey && DMX_PROFILES[modelKey]) profileName = modelKey;
+                    // Then try channel count match from common types
+                    if (!profileName) {
+                      profileName = allProfiles.find(p => DMX_PROFILES[p].channels === dev.dmxFootprint) || null;
+                    }
+                    // Fallback: create a generic profile
+                    if (!profileName) {
+                      const genName = (modelKey || 'RDM') + '_' + dev.dmxFootprint + 'CH';
+                      if (!DMX_PROFILES[genName]) {
+                        const map = {};
+                        if (dev.dmxFootprint >= 1) map.dimmer = {offset:0, bits:8};
+                        for (let ch = 1; ch < dev.dmxFootprint && ch < 64; ch++) {
+                          map['ch' + (ch+1)] = {offset: ch, bits: 8};
+                        }
+                        DMX_PROFILES[genName] = { channels: dev.dmxFootprint, map };
+                        TYPE_COLORS[genName] = '#ff8844';
+                        // Save to custom profiles
+                        try {
+                          const cp = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}");
+                          cp[genName] = { channels: dev.dmxFootprint, map, color: '#ff8844' };
+                          localStorage.setItem("lumina-custom-profiles", JSON.stringify(cp));
+                        } catch(e) {}
+                      }
+                      profileName = genName;
+                    }
+                    const name = dev.label || (dev.model ? dev.model + ' ' + (idx+1) : 'RDM ' + fxId);
+                    const color = TYPE_COLORS[profileName] || '#ff8844';
+                    newFixtures.push({ id: fxId, name, color, type: profileName, position: 'FRONT 1' });
+                    newPatch[fxId] = { universe: dev.universe, address: dev.dmxAddress, profile: profileName, overrides: {} };
+                  });
+                  setFixtures(prev => [...prev, ...newFixtures]);
+                  setDmxPatch(newPatch);
+                  setRdmDialogOpen(false);
+                  setCustomProfilesVer(v => v + 1);
+                }} style={{padding:"6px 16px",fontSize:10,background:"#1a0a00",border:"1px solid #ff884466",color:"#ff8844",borderRadius:3,cursor:rdmSelected.size>0?"pointer":"not-allowed",letterSpacing:1,fontWeight:"bold",opacity:rdmSelected.size>0?1:0.5}}>
+                  IMPORT {rdmSelected.size > 0 ? rdmSelected.size + " " : ""}SELECTED
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Fixture Manager Modal */}
       {fixtureManagerOpen && (
         <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureManagerOpen(false)}>
@@ -2701,6 +2824,22 @@ function LightingTimeline() {
                 setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);setLibAddCount(1);setLibQtyKeypad(null);
                 setFixtureLibraryOpen(true);
               }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a0a",border:"1px solid #ffaa4444",color:"#ffaa44",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>LIBRARY</button>
+              <button onClick={()=>{
+                if (!outputConnected) { alert("Connect to server first (enable output)"); return; }
+                if (rdmDiscovering) return;
+                // Gather unique universes from current patch (or scan 1-4 by default)
+                const unis = new Set();
+                Object.values(dmxPatch).forEach(fp => unis.add(fp.universe || 1));
+                if (unis.size === 0) { unis.add(1); unis.add(2); unis.add(3); unis.add(4); }
+                const universeList = [...unis].sort((a,b)=>a-b);
+                if (outputWsRef.current && outputWsRef.current.readyState === 1) {
+                  outputWsRef.current.send(JSON.stringify({ type: 'rdm_discover', universes: universeList }));
+                  setRdmDiscovering(true);
+                  setRdmProgress({ universe: 0, phase: 'starting', found: 0, total: universeList.length });
+                }
+              }} style={{flex:1,padding:"6px 0",fontSize:10,background:rdmDiscovering?"#2a1a0a":"#1a0a00",border:"1px solid #ff884444",color:rdmDiscovering?"#886644":"#ff8844",borderRadius:3,cursor:rdmDiscovering?"wait":"pointer",letterSpacing:1,fontWeight:"bold",opacity:rdmDiscovering?0.6:1}}>
+                {rdmDiscovering ? (rdmProgress ? `📡 SCANNING U${rdmProgress.universe}...` : "📡 SCANNING...") : "📡 RDM DISCOVER"}
+              </button>
               <button onClick={()=>{
                 setDmxPatch(prev => {
                   // Merge: keep existing custom addresses, only add defaults for new fixtures

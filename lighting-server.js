@@ -320,6 +320,336 @@ function buildSACNPacket(universe, dmxData) {
   return buf;
 }
 
+// --- RDM over ArtNet ---
+// ArtNet RDM opcodes (little-endian in packet)
+const OP_TOD_REQUEST = 0x8000;
+const OP_TOD_DATA    = 0x8100;
+const OP_TOD_CONTROL = 0x8200;
+const OP_RDM         = 0x8300;
+
+// RDM command classes
+const CC_GET_COMMAND = 0x20;
+const CC_GET_COMMAND_RESPONSE = 0x21;
+
+// RDM PIDs
+const PID_DEVICE_INFO                = 0x0060;
+const PID_DEVICE_MODEL_DESCRIPTION   = 0x0080;
+const PID_MANUFACTURER_LABEL         = 0x0081;
+const PID_DEVICE_LABEL               = 0x0082;
+const PID_DMX_PERSONALITY            = 0x00E0;
+const PID_DMX_PERSONALITY_DESCRIPTION = 0x00E1;
+const PID_DMX_START_ADDRESS          = 0x00F0;
+
+// Controller UID (Lumina FX — manufacturer 0x7FFF + device 0x00000001)
+const LUMINA_UID = Buffer.from([0x7F, 0xFF, 0x00, 0x00, 0x00, 0x01]);
+
+let rdmDiscovering = false;
+let rdmTransactionNum = 0;
+let rdmPendingResolve = null;
+let rdmPendingTimeout = null;
+
+// Build ArtTodRequest — request Table of Devices for a universe
+function buildArtTodRequest(universe) {
+  // universe is 1-indexed (Lumina), ArtNet uses 0-indexed
+  const artUni = universe - 1;
+  const net = (artUni >> 8) & 0x7F;
+  const subUni = artUni & 0xFF;
+  const buf = Buffer.alloc(25);
+  buf.write('Art-Net\0', 0, 8, 'ascii');
+  buf.writeUInt16LE(OP_TOD_REQUEST, 8);
+  buf[10] = 0x00; buf[11] = 0x0E; // protocol version 14
+  // bytes 12-20: filler/spare (zeros)
+  buf[21] = net;
+  buf[22] = 0x00; // Command: TodFull
+  buf[23] = 1;    // AdCount: 1 address
+  buf[24] = subUni;
+  return buf;
+}
+
+// Build ArtTodControl — flush and force full re-discovery
+function buildArtTodControl(universe) {
+  const artUni = universe - 1;
+  const net = (artUni >> 8) & 0x7F;
+  const subUni = artUni & 0xFF;
+  const buf = Buffer.alloc(24);
+  buf.write('Art-Net\0', 0, 8, 'ascii');
+  buf.writeUInt16LE(OP_TOD_CONTROL, 8);
+  buf[10] = 0x00; buf[11] = 0x0E;
+  buf[21] = net;
+  buf[22] = 0x01; // Command: AtcFlush
+  buf[23] = subUni;
+  return buf;
+}
+
+// Build an RDM GET message (without DMX start code 0xCC)
+function buildRdmGetMessage(destUID, transNum, pid, paramData) {
+  const pdl = paramData ? paramData.length : 0;
+  const msgLen = 24 + pdl; // SubStartCode through Checksum (inclusive)
+  const buf = Buffer.alloc(msgLen);
+  buf[0] = 0x01;    // SubStartCode (RDM)
+  buf[1] = msgLen;  // MessageLength
+  destUID.copy(buf, 2);    // Destination UID (6 bytes)
+  LUMINA_UID.copy(buf, 8); // Source UID (6 bytes)
+  buf[14] = transNum & 0xFF; // TransactionNumber
+  buf[15] = 0x01;  // PortID
+  buf[16] = 0x00;  // MessageCount
+  buf.writeUInt16BE(0x0000, 17); // SubDevice (root)
+  buf[19] = CC_GET_COMMAND;
+  buf.writeUInt16BE(pid, 20);
+  buf[22] = pdl;
+  if (paramData && pdl > 0) paramData.copy(buf, 23);
+  // Checksum: sum of all bytes from offset 0 to msgLen-3
+  let checksum = 0;
+  for (let i = 0; i < msgLen - 2; i++) checksum += buf[i];
+  buf.writeUInt16BE(checksum & 0xFFFF, msgLen - 2);
+  return buf;
+}
+
+// Wrap an RDM message inside an ArtRdm packet
+function buildArtRdm(universe, rdmMessage) {
+  const artUni = universe - 1;
+  const net = (artUni >> 8) & 0x7F;
+  const subUni = artUni & 0xFF;
+  const headerLen = 24;
+  const buf = Buffer.alloc(headerLen + rdmMessage.length);
+  buf.write('Art-Net\0', 0, 8, 'ascii');
+  buf.writeUInt16LE(OP_RDM, 8);
+  buf[10] = 0x00; buf[11] = 0x0E;
+  buf[12] = 0x01; // RdmVer: Standard V1.0
+  // bytes 13-20: filler/spare
+  buf[21] = 0x00; // Command: ArProcess
+  buf[22] = subUni;
+  buf[23] = net;
+  rdmMessage.copy(buf, 24);
+  return buf;
+}
+
+// Parse ArtTodData — extract RDM UIDs
+function parseArtTodData(buf) {
+  if (buf.length < 28) return null;
+  if (buf.toString('ascii', 0, 7) !== 'Art-Net') return null;
+  const opCode = buf.readUInt16LE(8);
+  if (opCode !== OP_TOD_DATA) return null;
+  const net = buf[21];
+  const subUni = buf[23];
+  const universe = ((net << 8) | subUni) + 1; // back to 1-indexed
+  const uidTotal = (buf[24] << 8) | buf[25];
+  const blockCount = buf[26];
+  const uidCount = buf[27];
+  const uids = [];
+  for (let i = 0; i < uidCount; i++) {
+    const offset = 28 + (i * 6);
+    if (offset + 6 > buf.length) break;
+    const uid = Buffer.from(buf.slice(offset, offset + 6));
+    const mfr = uid.readUInt16BE(0);
+    const dev = uid.readUInt32BE(2);
+    uids.push({
+      raw: uid,
+      manufacturer: mfr,
+      device: dev,
+      text: mfr.toString(16).toUpperCase().padStart(4, '0') + ':' + dev.toString(16).toUpperCase().padStart(8, '0')
+    });
+  }
+  return { universe, uidTotal, blockCount, uidCount, uids };
+}
+
+// Parse ArtRdm response — extract RDM parameter data
+function parseArtRdmResponse(buf) {
+  if (buf.length < 25) return null;
+  if (buf.toString('ascii', 0, 7) !== 'Art-Net') return null;
+  const opCode = buf.readUInt16LE(8);
+  if (opCode !== OP_RDM) return null;
+  // RDM data starts at offset 24
+  const rdm = buf.slice(24);
+  if (rdm.length < 23) return null;
+  if (rdm[0] !== 0x01) return null; // SubStartCode
+  const sourceUID = rdm.slice(8, 14);
+  const commandClass = rdm[19];
+  const pid = rdm.readUInt16BE(20);
+  const pdl = rdm[22];
+  const paramData = pdl > 0 && rdm.length >= 23 + pdl ? rdm.slice(23, 23 + pdl) : null;
+  return { commandClass, pid, pdl, paramData, sourceUID };
+}
+
+// Parse DEVICE_INFO response (19 bytes)
+function parseDeviceInfo(pd) {
+  if (!pd || pd.length < 19) return null;
+  return {
+    deviceModel: pd.readUInt16BE(2),
+    productCategory: pd.readUInt16BE(4),
+    softwareVersion: pd.readUInt32BE(6),
+    dmxFootprint: pd.readUInt16BE(10),
+    currentPersonality: pd[12],
+    personalityCount: pd[13],
+    dmxStartAddress: pd.readUInt16BE(14),
+    subDeviceCount: pd.readUInt16BE(16),
+    sensorCount: pd[18]
+  };
+}
+
+// Parse DMX_PERSONALITY_DESCRIPTION response
+function parsePersonalityDesc(pd) {
+  if (!pd || pd.length < 3) return null;
+  return {
+    personality: pd[0],
+    dmxSlots: pd.readUInt16BE(1),
+    description: pd.slice(3).toString('ascii').replace(/\0+$/, '').trim()
+  };
+}
+
+// Send-and-wait helper: send a UDP packet and wait for a matching response
+function rdmSendAndWait(packet, destIP, timeoutMs) {
+  return new Promise((resolve) => {
+    if (rdmPendingTimeout) clearTimeout(rdmPendingTimeout);
+    rdmPendingResolve = resolve;
+    artnetSocket.send(packet, 0, packet.length, ARTNET_PORT, destIP);
+    rdmPendingTimeout = setTimeout(() => {
+      rdmPendingResolve = null;
+      resolve(null); // timeout — no response
+    }, timeoutMs);
+  });
+}
+
+// Handle incoming RDM packets (called from onArtNetInput or dedicated listener)
+function handleRdmPacket(buf, rinfo) {
+  if (buf.length < 12) return;
+  if (buf.toString('ascii', 0, 7) !== 'Art-Net') return;
+  const opCode = buf.readUInt16LE(8);
+
+  if (opCode === OP_TOD_DATA) {
+    const tod = parseArtTodData(buf);
+    if (tod && rdmPendingResolve) {
+      const resolve = rdmPendingResolve;
+      rdmPendingResolve = null;
+      if (rdmPendingTimeout) clearTimeout(rdmPendingTimeout);
+      resolve({ type: 'tod', data: tod, ip: rinfo.address });
+    }
+  } else if (opCode === OP_RDM) {
+    const rdmResp = parseArtRdmResponse(buf);
+    if (rdmResp && rdmResp.commandClass === CC_GET_COMMAND_RESPONSE && rdmPendingResolve) {
+      const resolve = rdmPendingResolve;
+      rdmPendingResolve = null;
+      if (rdmPendingTimeout) clearTimeout(rdmPendingTimeout);
+      resolve({ type: 'rdm', data: rdmResp, ip: rinfo.address });
+    }
+  }
+}
+
+// Query a single RDM PID from a device
+async function rdmGetPID(universe, destUID, gatewayIP, pid, paramData) {
+  rdmTransactionNum = (rdmTransactionNum + 1) & 0xFF;
+  const rdmMsg = buildRdmGetMessage(destUID, rdmTransactionNum, pid, paramData || null);
+  const artRdm = buildArtRdm(universe, rdmMsg);
+  const resp = await rdmSendAndWait(artRdm, gatewayIP, 500);
+  if (resp && resp.type === 'rdm' && resp.data.pid === pid) return resp.data.paramData;
+  // Retry once
+  rdmTransactionNum = (rdmTransactionNum + 1) & 0xFF;
+  const rdmMsg2 = buildRdmGetMessage(destUID, rdmTransactionNum, pid, paramData || null);
+  const artRdm2 = buildArtRdm(universe, rdmMsg2);
+  const resp2 = await rdmSendAndWait(artRdm2, gatewayIP, 500);
+  if (resp2 && resp2.type === 'rdm' && resp2.data.pid === pid) return resp2.data.paramData;
+  return null;
+}
+
+// Full RDM discovery across specified universes
+async function rdmDiscover(universes) {
+  if (rdmDiscovering) return [];
+  rdmDiscovering = true;
+  console.log('[RDM] Starting discovery on universes:', universes);
+
+  // Ensure input socket is active to receive RDM responses
+  startInputSocket();
+
+  const allDevices = [];
+  const destIP = clientConfig.artnetHost || '255.255.255.255';
+
+  for (const uni of universes) {
+    broadcastToClients({ type: 'rdm_progress', universe: uni, phase: 'discovering', found: 0, total: universes.length });
+
+    // Step 1: Send ArtTodControl to flush and force re-discovery
+    const flushPkt = buildArtTodControl(uni);
+    artnetSocket.send(flushPkt, 0, flushPkt.length, ARTNET_PORT, destIP);
+    await new Promise(r => setTimeout(r, 200)); // brief pause for gateways to start discovery
+
+    // Step 2: Send ArtTodRequest and collect UIDs
+    const todPkt = buildArtTodRequest(uni);
+    const todResp = await rdmSendAndWait(todPkt, destIP, 3000);
+
+    if (!todResp || todResp.type !== 'tod' || !todResp.data.uids.length) {
+      console.log(`[RDM] Universe ${uni}: no devices found`);
+      continue;
+    }
+
+    const { uids } = todResp.data;
+    const gatewayIP = todResp.ip; // remember which gateway responded
+    console.log(`[RDM] Universe ${uni}: found ${uids.length} device(s) via ${gatewayIP}`);
+
+    // Step 3: Query each device for details
+    for (let i = 0; i < uids.length; i++) {
+      const uid = uids[i];
+      broadcastToClients({ type: 'rdm_progress', universe: uni, phase: 'querying', found: i + 1, total: uids.length, uid: uid.text });
+
+      const device = {
+        uid: uid.text,
+        universe: uni,
+        manufacturer: '',
+        model: '',
+        label: '',
+        dmxAddress: 0,
+        dmxFootprint: 0,
+        personality: 0,
+        personalityCount: 0,
+        personalityName: '',
+        productCategory: 0,
+        gatewayIP
+      };
+
+      // GET DEVICE_INFO
+      const diPD = await rdmGetPID(uni, uid.raw, gatewayIP, PID_DEVICE_INFO);
+      if (diPD) {
+        const info = parseDeviceInfo(diPD);
+        if (info) {
+          device.dmxAddress = info.dmxStartAddress;
+          device.dmxFootprint = info.dmxFootprint;
+          device.personality = info.currentPersonality;
+          device.personalityCount = info.personalityCount;
+          device.productCategory = info.productCategory;
+        }
+      }
+
+      // GET MANUFACTURER_LABEL
+      const mfPD = await rdmGetPID(uni, uid.raw, gatewayIP, PID_MANUFACTURER_LABEL);
+      if (mfPD) device.manufacturer = mfPD.toString('ascii').replace(/\0+$/, '').trim();
+
+      // GET DEVICE_MODEL_DESCRIPTION
+      const mdPD = await rdmGetPID(uni, uid.raw, gatewayIP, PID_DEVICE_MODEL_DESCRIPTION);
+      if (mdPD) device.model = mdPD.toString('ascii').replace(/\0+$/, '').trim();
+
+      // GET DEVICE_LABEL
+      const dlPD = await rdmGetPID(uni, uid.raw, gatewayIP, PID_DEVICE_LABEL);
+      if (dlPD) device.label = dlPD.toString('ascii').replace(/\0+$/, '').trim();
+
+      // GET DMX_PERSONALITY_DESCRIPTION for current personality
+      if (device.personality > 0) {
+        const pdBuf = Buffer.alloc(1);
+        pdBuf[0] = device.personality;
+        const ppPD = await rdmGetPID(uni, uid.raw, gatewayIP, PID_DMX_PERSONALITY_DESCRIPTION, pdBuf);
+        if (ppPD) {
+          const desc = parsePersonalityDesc(ppPD);
+          if (desc) device.personalityName = desc.description;
+        }
+      }
+
+      console.log(`[RDM]   ${uid.text}: ${device.manufacturer} ${device.model} @ ${uni}.${device.dmxAddress} (${device.dmxFootprint}ch)`);
+      allDevices.push(device);
+    }
+  }
+
+  rdmDiscovering = false;
+  console.log(`[RDM] Discovery complete: ${allDevices.length} device(s) found`);
+  return allDevices;
+}
+
 // --- ArtNet Input Parser ---
 function parseArtNetDMX(buf) {
   if (buf.length < 20) return null;
@@ -342,6 +672,15 @@ const forwardTimers = {};
 const FORWARD_INTERVAL = 100;
 
 function onArtNetInput(buf, rinfo) {
+  // Route RDM packets regardless of input config (discovery is independent)
+  if (buf.length >= 12 && buf.toString('ascii', 0, 7) === 'Art-Net') {
+    const op = buf.readUInt16LE(8);
+    if (op === OP_TOD_DATA || op === OP_RDM) {
+      handleRdmPacket(buf, rinfo);
+      return;
+    }
+  }
+
   if (!inputConfig.enabled) return;
 
   // Feedback loop prevention: ignore our own packets
@@ -612,6 +951,23 @@ wss.on('connection', (ws) => {
       if (msg.type === 'monitor') {
         monitorEnabled = !!msg.enabled;
         console.log('[MONITOR]', monitorEnabled ? 'ON' : 'OFF');
+      }
+
+      // --- RDM Discovery ---
+      if (msg.type === 'rdm_discover') {
+        if (rdmDiscovering) {
+          ws.send(JSON.stringify({ type: 'rdm_progress', universe: 0, phase: 'busy', found: 0, total: 0 }));
+        } else {
+          const universes = msg.universes || [1];
+          console.log('[RDM] Discovery requested for universes:', universes);
+          rdmDiscover(universes).then(devices => {
+            broadcastToClients({ type: 'rdm_results', devices });
+          }).catch(err => {
+            console.error('[RDM] Discovery error:', err.message);
+            rdmDiscovering = false;
+            broadcastToClients({ type: 'rdm_results', devices: [], error: err.message });
+          });
+        }
       }
 
       // --- Network config (2-NIC setup) ---
