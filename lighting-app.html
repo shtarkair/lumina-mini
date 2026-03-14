@@ -1266,6 +1266,7 @@ function LightingTimeline() {
   const [libSelectedMfr, setLibSelectedMfr] = useState(null);
   const [libSelectedFx, setLibSelectedFx] = useState(null);
   const [libSelectedMode, setLibSelectedMode] = useState(0);
+  const [libAddCount, setLibAddCount] = useState(1);
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -2327,7 +2328,7 @@ function LightingTimeline() {
                 if(!fixtureLibraryData){
                   fetch('/fixture-library.json').then(r=>r.json()).then(data=>{setFixtureLibraryData(data);}).catch(e=>alert("Failed to load fixture library"));
                 }
-                setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);
+                setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);setLibAddCount(1);
                 setFixtureLibraryOpen(true);
               }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a0a",border:"1px solid #ffaa4444",color:"#ffaa44",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>LIBRARY</button>
               <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
@@ -2513,6 +2514,7 @@ function LightingTimeline() {
         const selMode = selFxObj ? (selFxObj.modes[libSelectedMode] || selFxObj.modes[0]) : null;
         const addToProfiles = () => {
           if (!selFxObj || !selMode) return;
+          const count = Math.max(1, Math.min(64, libAddCount || 1));
           // Build a short but descriptive profile name
           const baseName = selFxObj.shortName
             ? selFxObj.shortName.toUpperCase().replace(/[^A-Z0-9]/g,'_')
@@ -2529,6 +2531,15 @@ function LightingTimeline() {
           custom[profileName] = prof;
           localStorage.setItem("lumina-custom-profiles", JSON.stringify(custom));
           setCustomProfilesVer(v => v + 1);
+          // Add N fixtures with this profile
+          setFixtures(prev => {
+            const maxId = prev.reduce((m, f) => Math.max(m, f.id), 0);
+            const newFx = [];
+            for (let i = 0; i < count; i++) {
+              newFx.push({ id: maxId + 1 + i, name: selFxObj.name + (count > 1 ? ' ' + (i + 1) : ''), color: "#ffaa44", type: profileName });
+            }
+            return [...prev, ...newFx];
+          });
           setFixtureLibraryOpen(false);
         };
         return (
@@ -2605,9 +2616,11 @@ function LightingTimeline() {
                         </div>
                       </div>
                     )}
-                    {/* Add button */}
-                    <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a"}}>
-                      <button onClick={addToProfiles} style={{width:"100%",padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD TO PROFILES</button>
+                    {/* Add button with quantity */}
+                    <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a",display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:9,color:"#888",letterSpacing:1}}>QTY</span>
+                      <input type="number" min={1} max={64} value={libAddCount} onChange={e=>setLibAddCount(Math.max(1,Math.min(64,+e.target.value||1)))} style={{width:48,background:"#080a0e",border:"1px solid #44ffaa33",color:"#44ffaa",borderRadius:3,padding:"6px 4px",fontSize:13,textAlign:"center",fontFamily:"monospace",fontWeight:"bold"}}/>
+                      <button onClick={addToProfiles} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD {libAddCount > 1 ? libAddCount + ' FIXTURES' : 'FIXTURE'}</button>
                     </div>
                   </React.Fragment>
                 )}
