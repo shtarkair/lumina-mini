@@ -2013,6 +2013,7 @@ function LightingTimeline() {
     }
     if(tool==="erase"){setCues(prev=>prev.filter(c=>c.id!==cue.id));return;}
     setSelectedCue(cue.id);
+    setPopupPos({x:e.clientX,y:e.clientY});
     if(e.target.dataset.resize){
       if(selectedCues.has(cue.id)&&selectedCues.size>1){
         const startDurations={};
@@ -2085,6 +2086,7 @@ function LightingTimeline() {
           setSelectedCues(sel);
           if(sel.size===1) setSelectedCue([...sel][0]);
           if(sel.size>0) setPopupPos({x:e.clientX,y:e.clientY});
+          else { setSelectedCue(null); setPopupPos(null); }
         }
         setBoxSelect(null);
       }
@@ -2102,7 +2104,7 @@ function LightingTimeline() {
       if(e.key==="Shift"&&!shiftTimerRef.current){
         shiftTimerRef.current=setTimeout(()=>{setCopyMode(true);},2000);
       }
-      if(e.key==="Escape"){setCopyMode(false);setCopiedCues(null);setSelectedCues(new Set());}
+      if(e.key==="Escape"){setCopyMode(false);setCopiedCues(null);setSelectedCues(new Set());setSelectedCue(null);setPopupPos(null);}
       if((e.key==="Delete"||e.key==="Backspace")&&!e.target.closest("input")){
         e.preventDefault();
         if(selectedCues.size>0){setCues(prev=>prev.filter(c=>!selectedCues.has(c.id)));setSelectedCues(new Set());setSelectedCue(null);}
@@ -2153,11 +2155,11 @@ function LightingTimeline() {
     <div style={{width:"100%",height:"100vh",background:"#141820",display:"flex",flexDirection:"column",fontFamily:"'Courier New',monospace",color:"#c0c6d0",overflow:"hidden",userSelect:"none"}}>
 
       {loopFlash&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(232,170,34,0.08)",pointerEvents:"none",zIndex:999,animation:"loopflash 0.25s ease-out forwards"}}/>}
-      {selectedCues.size>0&&(()=>{const PW=280,PH=580,PAD=8;const px=popupPos?Math.max(PAD,Math.min(popupPos.x-PW/2,window.innerWidth-PW-PAD)):Math.round((window.innerWidth-PW)/2);const py=popupPos?Math.max(PAD,Math.min(popupPos.y-PH-20,window.innerHeight-PH-PAD)):window.innerHeight-PH-PAD;const flyDx2=popupPos?(popupPos.x-px-PW/2):0;const flyDy2=popupPos?(popupPos.y-py):0;return <div onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:9999,pointerEvents:"auto",touchAction:"none","--fly-dx":`${flyDx2}px`,"--fly-dy":`${flyDy2}px`,animation:"flyIn 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
+      {selectedCues.size>0&&popupPos&&(()=>{const PW=280,PH=580,PAD=8;const px=popupPos?Math.max(PAD,Math.min(popupPos.x-PW/2,window.innerWidth-PW-PAD)):Math.round((window.innerWidth-PW)/2);const py=popupPos?Math.max(PAD,Math.min(popupPos.y-PH-20,window.innerHeight-PH-PAD)):window.innerHeight-PH-PAD;const flyDx2=popupPos?(popupPos.x-px-PW/2):0;const flyDy2=popupPos?(popupPos.y-py):0;return <div onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:9999,pointerEvents:"auto",touchAction:"none","--fly-dx":`${flyDx2}px`,"--fly-dy":`${flyDy2}px`,animation:"flyIn 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
         <div style={{background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:7,boxShadow:"0 6px 30px rgba(0,0,0,0.7)",width:PW}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:5}}>
             <span style={{fontSize:12,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>{selectedCues.size} SELECTED</span>
-            <button onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={()=>{setSelectedCues(new Set());setSelectedCue(null);setPopupPos(null);}} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
+            <button onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={()=>{setPopupPos(null);}} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
             {[
