@@ -7,6 +7,8 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #0f1115; }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
     input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; border-radius: 4px; outline: none; height: 28px; }
     input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: repeating-linear-gradient(90deg, #333840 0px, #333840 1px, #1a1e26 1px, #1a1e26 8px); border: 1px solid #252930; }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff8, #e8aa22 40%, #b8880a); cursor: pointer; border: 2px solid #0f1115; margin-top: -9px; box-shadow: 0 0 10px #e8aa2288, 0 0 20px #e8aa2244, 0 2px 4px rgba(0,0,0,0.5); }
@@ -582,7 +584,7 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
           const types=[...new Set(fixtures.map(f=>f.type))];
           const colors=[...new Set(fixtures.map(f=>f.color))];
           const positions=[...new Set(fixtures.map(f=>f.position||"FRONT 1"))];
-          const btnS=(sel,col)=>({minHeight:44,background:sel?col+"22":"#0c0e12",border:`1px solid ${sel?col:"#252930"}`,color:sel?col:"#555",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:6,touchAction:"manipulation"});
+          const btnS=(sel,col)=>({minHeight:44,background:sel?col+"33":"#0c0e12",border:`2px solid ${sel?col:"#252930"}`,color:sel?col:"#555",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:6,touchAction:"manipulation",boxShadow:sel?`0 0 10px ${col}44, inset 0 0 8px ${col}22`:"none",textShadow:sel?`0 0 6px ${col}66`:"none"});
           return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002,animation:"backdropIn 0.2s ease-out"}} onClick={()=>setFxPickerOpen(false)}>
             <div onClick={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:10003,background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:8,padding:10,boxShadow:"0 6px 30px rgba(0,0,0,0.8)",width:PW,maxHeight:"80vh",overflowY:"auto","--fly-dx":`${flyDx}px`,"--fly-dy":`${flyDy}px`,animation:"flyIn 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:6,marginBottom:6}}>
@@ -590,7 +592,7 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
                 <button onClick={()=>setFxPickerOpen(false)} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
-                <button onClick={selAll} style={btnS(selFixtures.size===fixtures.length,"#44ffaa")}>ALL</button>
+                <button onClick={selAll} style={selFixtures.size===fixtures.length?{...btnS(true,"#44ffaa"),background:"#e8e8e8",color:"#0a0c10",border:"2px solid #ffffff",textShadow:"none",boxShadow:"0 0 12px rgba(255,255,255,0.3)"}:btnS(false,"#44ffaa")}>ALL</button>
                 <button onClick={selNone} style={btnS(selFixtures.size===0,"#ff6644")}>NONE</button>
               </div>
               {types.length>1&&<><div style={{fontSize:9,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>BY TYPE</div>
@@ -717,10 +719,11 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes }) {
+const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes, bpm }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
+  const [fadeUnit, setFadeUnit] = useState("beats");
 
   // Seq-only save/load (v2 format)
   const handleSaveSeq = () => {
@@ -808,10 +811,22 @@ const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures
         <button onClick={()=>{setSeqClearMode(!seqClearMode);setSeqStoreMode(false);}} style={{flex:1,padding:"10px 0",fontSize:12,letterSpacing:1,background:seqClearMode?"#1c0f0f":"#0c0e12",border:seqClearMode?"1px solid #ff5544":"1px solid #252930",color:seqClearMode?"#ff5544":"#555",borderRadius:5,cursor:"pointer",animation:seqClearMode?"seqclear 1.5s ease-in-out infinite":"none",fontWeight:"bold",minHeight:44,touchAction:"manipulation"}}>✖ CLEAR</button>
         <button onClick={()=>setSeqRecallMode(seqRecallMode==="merge"?"replace":"merge")} style={{flex:1,padding:"10px 0",fontSize:12,letterSpacing:1,background:"#0c0e12",border:"1px solid #252930",color:seqRecallMode==="merge"?"#44aaff":"#ff8844",borderRadius:5,cursor:"pointer",fontWeight:"bold",minHeight:44,touchAction:"manipulation"}}>{seqRecallMode==="merge"?"MERGE":"REPLACE"}</button>
       </div>
-      <div style={{display:"flex",gap:4,alignItems:"center"}}>
-        <span style={{fontSize:8,color:"#555",letterSpacing:1,whiteSpace:"nowrap"}}>FADE</span>
-        <input type="range" min={0} max={16} step={0.25} value={seqFadeBeats} onChange={e=>setSeqFadeBeats(+e.target.value)} style={{flex:1,accentColor:seqFadeBeats>0?"#e8aa22":"#333"}}/>
-        <span style={{fontSize:9,color:seqFadeBeats>0?"#e8aa22":"#555",fontFamily:"monospace",width:40,textAlign:"right"}}>{seqFadeBeats>0?seqFadeBeats+"b":"OFF"}</span>
+      <div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:8,color:"#555",letterSpacing:1}}>CROSSFADE</span>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:9,color:seqFadeBeats>0?"#e8aa22":"#555",fontFamily:"monospace"}}>{seqFadeBeats>0?(fadeUnit==="sec"?(seqFadeBeats*60/bpm).toFixed(1)+"s":seqFadeBeats+" beats"):"OFF"}</span>
+            <button onClick={()=>setFadeUnit(u=>u==="beats"?"sec":"beats")} style={{fontSize:7,padding:"1px 4px",background:fadeUnit==="sec"?"#e8aa2222":"#0c0e12",border:"1px solid "+(fadeUnit==="sec"?"#e8aa2266":"#252930"),color:fadeUnit==="sec"?"#e8aa22":"#555",cursor:"pointer",letterSpacing:0.5,fontWeight:"bold"}}>{fadeUnit==="sec"?"SEC":"BT"}</button>
+          </div>
+        </div>
+        <GlowSlider min={0} max={16} step={0.25} value={seqFadeBeats} onChange={setSeqFadeBeats} color="#e8aa22" ticks={16}/>
+        <div style={{position:"relative",height:20,marginTop:-2}}>
+          <div style={{position:"absolute",left:0,right:0,top:0,height:1,background:"#252930"}}/>
+          {Array.from({length:17},(_,i)=>i).map(b=>{const pct=(b/16)*100;const isMajor=b%4===0;const isEndpoint=b===0||b===8||b===16;const sec=bpm>0?(b*60/bpm):0;const label=fadeUnit==="sec"?(b===0?"0s":sec.toFixed(1)+"s"):(b===0?"0":b+"b");return <div key={b} style={{position:"absolute",left:`${pct}%`,top:0,transform:"translateX(-50%)"}}>
+            <div style={{width:1,height:isMajor?8:4,background:isEndpoint?"#888":isMajor?"#555":"#333",margin:"0 auto"}}/>
+            {isMajor&&<div style={{fontSize:7,color:isEndpoint?"#667":"#3a3f4c",fontWeight:isEndpoint?"bold":"normal",fontFamily:"monospace",textAlign:"center",marginTop:1,whiteSpace:"nowrap"}}>{label}</div>}
+          </div>;})}
+        </div>
       </div>
       <div style={{display:"flex",gap:4,alignItems:"center"}}>
         <button onClick={handleSaveSeq} style={{flex:1,padding:"10px 0",fontSize:12,letterSpacing:1,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:5,cursor:"pointer",fontWeight:"bold",minHeight:44,touchAction:"manipulation"}}>💾 SAVE</button>
@@ -2173,19 +2188,24 @@ function LightingTimeline() {
               {label:"\u2192\u2502 ALIGN END",color:"#44aaff",bg:"#0a1420",border:"#44aaff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length<2)return prev;const latest=Math.max(...sel.map(c=>c.beat+c.duration));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:latest-c.duration}:c);});},need:2},
               {label:"\u23EA HALF TIME",color:"#44ddff",bg:"#0a1a2a",border:"#44ddff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length===0)return prev;const minBeat=Math.min(...sel.map(c=>c.beat));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:minBeat+(c.beat-minBeat)*2}:c);});},need:1},
               {label:"\u23E9 DOUBLE TIME",color:"#44ddff",bg:"#0a1a2a",border:"#44ddff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length===0)return prev;const minBeat=Math.min(...sel.map(c=>c.beat));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:minBeat+(c.beat-minBeat)*0.5}:c);});},need:1},
-              {label:"\u2716 DELETE",color:"#ff4444",bg:"#1c0a0a",border:"#ff444444",action:()=>{setCues(prev=>prev.filter(c=>!selectedCues.has(c.id)));setSelectedCues(new Set());setSelectedCue(null);},need:1},
+              {label:"\u2716 DELETE",color:"#ff4444",bg:"#1c0a0a",border:"#ff444444",inverted:true,action:()=>{setCues(prev=>prev.filter(c=>!selectedCues.has(c.id)));setSelectedCues(new Set());setSelectedCue(null);},need:1},
               {label:"\u2B0D INVERT",color:"#cc88ff",bg:"#1a0a2a",border:"#cc88ff44",action:()=>{setCues(prev=>prev.map(c=>{if(!selectedCues.has(c.id))return c;const p=getParam(c.param);if(!p)return c;const inv=v=>p.max-(v-p.min);const nc={...c,value:inv(c.value)};if(c.startValue!==undefined)nc.startValue=inv(c.startValue);if(c.endValue!==undefined)nc.endValue=inv(c.endValue);return nc;}));},need:1},
             ].map((btn,i)=>(
-              <button key={i} onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.need<=selectedCues.size?btn.bg:"#111218",border:"1px solid "+(btn.need<=selectedCues.size?btn.border:"#1e2230"),color:btn.need<=selectedCues.size?btn.color:"#2a2e38",borderRadius:6,padding:"10px 10px",cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:12,fontWeight:"bold",letterSpacing:0.5,textAlign:"center",transition:"background 0.15s",minHeight:42,touchAction:"manipulation",lineHeight:"42px",padding:0}}>{btn.label}</button>
+              <button key={i} onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.need<=selectedCues.size?(btn.inverted?btn.color:btn.bg):"#111218",border:"1px solid "+(btn.need<=selectedCues.size?(btn.inverted?btn.color:btn.border):"#1e2230"),color:btn.need<=selectedCues.size?(btn.inverted?"#ffffff":btn.color):"#2a2e38",borderRadius:6,cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:12,fontWeight:"bold",letterSpacing:0.5,textAlign:"center",transition:"background 0.15s",minHeight:42,touchAction:"manipulation",lineHeight:"42px",padding:0,boxShadow:btn.need<=selectedCues.size&&btn.inverted?"0 0 12px rgba(255,68,68,0.4)":"none"}}>{btn.label}</button>
             ))}
           </div>
           <div style={{height:1,background:"#e8aa2233",margin:"4px 0"}}/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
-            {[
-              {label:"\u25A8 SEL FIXTURE",color:"#e8aa22",bg:"#1a1508",border:"#e8aa2244",action:()=>{const sel=cues.filter(c=>selectedCues.has(c.id));const params=new Set(sel.map(c=>c.param));const fxIds=new Set(sel.map(c=>c.fixtureId));const newSel=new Set();cues.forEach(c=>{if(fxIds.has(c.fixtureId)&&params.has(c.param))newSel.add(c.id);});setSelectedCues(newSel);},need:1},
-              {label:"\u25A8 SEL ALL FX",color:"#e8aa22",bg:"#1a1508",border:"#e8aa2244",action:()=>{const sel=cues.filter(c=>selectedCues.has(c.id));const params=new Set(sel.map(c=>c.param));const newSel=new Set();cues.forEach(c=>{if(params.has(c.param))newSel.add(c.id);});setSelectedCues(newSel);},need:1},
-            ].map((btn,i)=>(
-              <button key={"sel"+i} onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.need<=selectedCues.size?btn.bg:"#111218",border:"1px solid "+(btn.need<=selectedCues.size?btn.border:"#1e2230"),color:btn.need<=selectedCues.size?btn.color:"#2a2e38",borderRadius:6,cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:12,fontWeight:"bold",letterSpacing:0.5,textAlign:"center",transition:"background 0.15s",minHeight:42,touchAction:"manipulation",lineHeight:"42px",padding:0}}>{btn.label}</button>
+            {(()=>{const sel=cues.filter(c=>selectedCues.has(c.id));const params=new Set(sel.map(c=>c.param));const fxIds=new Set(sel.map(c=>c.fixtureId));
+              const fxTargets=new Set();cues.forEach(c=>{if(fxIds.has(c.fixtureId)&&params.has(c.param))fxTargets.add(c.id);});
+              const fxIsActive=fxTargets.size>0&&[...fxTargets].every(id=>selectedCues.has(id));
+              const allTargets=new Set();cues.forEach(c=>{if(params.has(c.param))allTargets.add(c.id);});
+              const allIsActive=allTargets.size>0&&[...allTargets].every(id=>selectedCues.has(id));
+              return [
+              {label:"\u25A8 SEL FIXTURE",active:fxIsActive,color:"#e8aa22",bg:"#1a1508",border:"#e8aa2244",action:()=>{setSelectedCues(fxTargets);},need:1},
+              {label:"\u25A8 SEL ALL FX",active:allIsActive,color:"#e8aa22",bg:"#1a1508",border:"#e8aa2244",action:()=>{setSelectedCues(allTargets);},need:1},
+            ];})().map((btn,i)=>(
+              <button key={"sel"+i} onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.active?"#e8e8e8":btn.need<=selectedCues.size?btn.bg:"#111218",border:"2px solid "+(btn.active?"#ffffff":btn.need<=selectedCues.size?btn.border:"#1e2230"),color:btn.active?"#0a0c10":btn.need<=selectedCues.size?btn.color:"#2a2e38",borderRadius:6,cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:12,fontWeight:"bold",letterSpacing:0.5,textAlign:"center",transition:"background 0.15s",minHeight:42,touchAction:"manipulation",lineHeight:"42px",padding:0,boxShadow:btn.active?"0 0 12px rgba(255,255,255,0.3)":"none",textShadow:"none"}}>{btn.label}</button>
             ))}
           </div>
         </div>
@@ -2403,18 +2423,18 @@ function LightingTimeline() {
                     <span style={{fontSize:9,color:"#555"}}>{editIds.size>1?"/ batch edit":`/ ${selParam.label}`}</span>
                   </div>
                   {[
-                    {label:"BEAT",key:"beat",val:+selCue.beat.toFixed(2),min:0,max:TOTAL_BEATS,step:0.25},
-                    {label:"DURATION",key:"duration",val:+selCue.duration.toFixed(2),min:0.25,max:TOTAL_BEATS,step:0.25},
-                    {label:`TARGET (${selParam.unit})`,key:"value",val:selCue.value,min:selParam.min,max:selParam.max,step:1},
-                    {label:`START (${selParam.unit})`,key:"startValue",val:selCue.startValue??selParam.min,min:selParam.min,max:selParam.max,step:1},
-                    {label:`END (${selParam.unit})`,key:"endValue",val:selCue.endValue??selParam.min,min:selParam.min,max:selParam.max,step:1},
+                    {label:"BEAT",key:"beat",val:+selCue.beat.toFixed(2),min:0,max:TOTAL_BEATS,step:0.25,isValue:false},
+                    {label:"DURATION",key:"duration",val:+selCue.duration.toFixed(2),min:0.25,max:TOTAL_BEATS,step:0.25,isValue:false},
+                    {label:`TARGET (${selParam.unit})`,key:"value",val:selCue.value,min:selParam.min,max:selParam.max,step:1,isValue:true},
+                    {label:`START (${selParam.unit})`,key:"startValue",val:selCue.startValue??selParam.min,min:selParam.min,max:selParam.max,step:1,isValue:true},
+                    {label:`END (${selParam.unit})`,key:"endValue",val:selCue.endValue??selParam.min,min:selParam.min,max:selParam.max,step:1,isValue:true},
                   ].map(row=>(
                     <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2}}>
                       <span style={{fontSize:8,color:"#3a3f4c",letterSpacing:1}}>{row.label}</span>
                       <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #1e3a1e",color:"#44cc44",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
                       <GlowSlider min={row.min} max={row.max} step={row.step} value={row.val} onChange={v=>updateCue(row.key,v)} color={selParam.color}/>
                     </div>
-                  ))}
+                  );})}
                   <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
                     <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:6}}>FADE TIMES</div>
                     {[{label:"FADE IN",key:"fadeIn",val:selCue.fadeIn??0},{label:"FADE OUT",key:"fadeOut",val:selCue.fadeOut??0}].map(row=>(
@@ -2461,7 +2481,7 @@ function LightingTimeline() {
                 </div>
               </div>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={displayPlayhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={displayPlayhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes} bpm={bpm}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
