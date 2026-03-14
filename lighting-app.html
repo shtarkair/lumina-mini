@@ -1390,6 +1390,7 @@ function LightingTimeline() {
   const [zoom,setZoom] = useState(1);
   const [selectedCue,setSelectedCue] = useState(null);
   const [selectedCues,setSelectedCues] = useState(new Set());
+  const [popupPos,setPopupPos] = useState(null);
   const selectedCuesRef = useRef(new Set());
   useEffect(() => { selectedCuesRef.current = selectedCues; }, [selectedCues]);
   const [boxSelect,setBoxSelect] = useState(null);
@@ -1890,6 +1891,7 @@ function LightingTimeline() {
     setExpandedGroups(new Set(fixtures.map(fx => `${fx.id}-${groupName}`)));
   }, [fixtures]);
 
+  const handleGridTouchStart=e=>{const t=e.touches[0];handleGridMouseDown({clientX:t.clientX,clientY:t.clientY,target:e.target,stopPropagation:()=>e.stopPropagation(),preventDefault:()=>e.preventDefault()});};
   const handleGridMouseDown=e=>{
     if(e.target.dataset.cue) return;
     const rect=timelineRef.current.getBoundingClientRect();
@@ -1917,6 +1919,7 @@ function LightingTimeline() {
     setCues(prev=>[...prev,newCue]);
   };
 
+  const handleCueTouchStart=(e,cue)=>{const t=e.touches[0];handleCueMouseDown({clientX:t.clientX,clientY:t.clientY,target:e.target,stopPropagation:()=>e.stopPropagation()},cue);};
   const handleCueMouseDown=(e,cue)=>{
     e.stopPropagation();
     if(copyMode){
@@ -1955,7 +1958,7 @@ function LightingTimeline() {
         setBoxSelect(prev=>prev?{...prev,curX:x,curY:y}:null);
       }
     };
-    const onUp=()=>{
+    const onUp=(e)=>{
       if(boxSelect){
         const x1=Math.min(boxSelect.startX,boxSelect.curX),x2=Math.max(boxSelect.startX,boxSelect.curX);
         const y1=Math.min(boxSelect.startY,boxSelect.curY),y2=Math.max(boxSelect.startY,boxSelect.curY);
@@ -1974,13 +1977,17 @@ function LightingTimeline() {
         } else {
           setSelectedCues(sel);
           if(sel.size===1) setSelectedCue([...sel][0]);
+          if(sel.size>0) setPopupPos({x:e.clientX,y:e.clientY});
         }
         setBoxSelect(null);
       }
       setDragging(null);setResizing(null);
     };
+    const onTouchMove=e=>{const t=e.touches[0];onMove({clientX:t.clientX,clientY:t.clientY});};
+    const onTouchEnd=e=>{const t=e.changedTouches[0];onUp({clientX:t.clientX,clientY:t.clientY});};
     window.addEventListener("mousemove",onMove); window.addEventListener("mouseup",onUp);
-    return()=>{window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp);};
+    window.addEventListener("touchmove",onTouchMove,{passive:true}); window.addEventListener("touchend",onTouchEnd);
+    return()=>{window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); window.removeEventListener("touchmove",onTouchMove); window.removeEventListener("touchend",onTouchEnd);};
   },[dragging,resizing,boxSelect,zoom,snapToGrid,cues,rows,tool]);
 
   useEffect(()=>{
@@ -2039,13 +2046,13 @@ function LightingTimeline() {
     <div style={{width:"100%",height:"100vh",background:"#141820",display:"flex",flexDirection:"column",fontFamily:"'Courier New',monospace",color:"#c0c6d0",overflow:"hidden",userSelect:"none"}}>
 
       {loopFlash&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(232,170,34,0.08)",pointerEvents:"none",zIndex:999,animation:"loopflash 0.25s ease-out forwards"}}/>}
-      {selectedCues.size>0&&<div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",bottom:36,left:"50%",transform:"translateX(-50%)",zIndex:9999,pointerEvents:"auto"}}>
-        <div style={{background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:8,padding:"8px 12px",display:"flex",flexDirection:"column",gap:6,boxShadow:"0 6px 30px rgba(0,0,0,0.7)",minWidth:220}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:4}}>
-            <span style={{fontSize:10,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>{selectedCues.size} SELECTED</span>
-            <button onMouseDown={e=>e.stopPropagation()} onClick={()=>{setSelectedCues(new Set());setSelectedCue(null);}} style={{background:"none",border:"none",color:"#556",cursor:"pointer",fontSize:12,padding:"0 2px"}}>{"\u2715"}</button>
+      {selectedCues.size>0&&(()=>{const PW=280,PH=580,PAD=8;const px=popupPos?Math.max(PAD,Math.min(popupPos.x-PW/2,window.innerWidth-PW-PAD)):Math.round((window.innerWidth-PW)/2);const py=popupPos?Math.max(PAD,Math.min(popupPos.y-PH-20,window.innerHeight-PH-PAD)):window.innerHeight-PH-PAD;return <div onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:9999,pointerEvents:"auto",touchAction:"none"}}>
+        <div style={{background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:7,boxShadow:"0 6px 30px rgba(0,0,0,0.7)",width:PW}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:5}}>
+            <span style={{fontSize:12,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>{selectedCues.size} SELECTED</span>
+            <button onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={()=>{setSelectedCues(new Set());setSelectedCue(null);setPopupPos(null);}} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
             {[
               {label:"\u266B QUANTIZE",color:"#e8aa22",bg:"#1a1508",border:"#e8aa2244",action:()=>{setCues(prev=>{const ids=new Set([...selectedCues]);return prev.map(c=>ids.has(c.id)?{...c,beat:Math.round(c.beat),duration:Math.max(0.25,Math.round(c.duration*4)/4)}:c);});},need:1},
               {label:"\u223F DISSOLVE",color:"#ffaa44",bg:"#1a1208",border:"#ffaa4444",action:handleDissolve,need:2},
@@ -2062,11 +2069,11 @@ function LightingTimeline() {
               {label:"\u2716 DEL ALL PAR",color:"#ff4444",bg:"#1c0a0a",border:"#ff444444",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));const params=new Set(sel.map(c=>c.param));return prev.filter(c=>!params.has(c.param));});setSelectedCues(new Set());setSelectedCue(null);},need:1},
               {label:"\u2B0D INVERT",color:"#cc88ff",bg:"#1a0a2a",border:"#cc88ff44",action:()=>{setCues(prev=>prev.map(c=>{if(!selectedCues.has(c.id))return c;const p=getParam(c.param);if(!p)return c;const inv=v=>p.max-(v-p.min);const nc={...c,value:inv(c.value)};if(c.startValue!==undefined)nc.startValue=inv(c.startValue);if(c.endValue!==undefined)nc.endValue=inv(c.endValue);return nc;}));},need:1},
             ].map((btn,i)=>(
-              <button key={i} onMouseDown={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.need<=selectedCues.size?btn.bg:"#111218",border:"1px solid "+(btn.need<=selectedCues.size?btn.border:"#1e2230"),color:btn.need<=selectedCues.size?btn.color:"#2a2e38",borderRadius:4,padding:"5px 8px",cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:10,fontWeight:"bold",letterSpacing:0.5,textAlign:"left",transition:"background 0.15s"}}>{btn.label}</button>
+              <button key={i} onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} onClick={btn.action} disabled={btn.need>selectedCues.size} style={{background:btn.need<=selectedCues.size?btn.bg:"#111218",border:"1px solid "+(btn.need<=selectedCues.size?btn.border:"#1e2230"),color:btn.need<=selectedCues.size?btn.color:"#2a2e38",borderRadius:6,padding:"10px 10px",cursor:btn.need<=selectedCues.size?"pointer":"default",fontSize:12,fontWeight:"bold",letterSpacing:0.5,textAlign:"center",transition:"background 0.15s",minHeight:42,touchAction:"manipulation",lineHeight:"42px",padding:0}}>{btn.label}</button>
             ))}
           </div>
         </div>
-      </div>}
+      </div>;})()}
       {(()=>{
         const msg=copyMode?(copiedCues?{text:`PASTE (${copiedCues.length}) \u2014 click lane to place`,color:"#44aaff"}:{text:"COPY \u2014 click a cue to copy",color:"#44ffaa"}):(tool==="erase"?{text:"ERASE \u2014 click cues to delete",color:"#ff4444"}:null);
         return msg?<div style={{position:"fixed",top:6,left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:5,background:"#0c0e12dd",border:`1px solid ${msg.color}44`,borderRadius:4,padding:"3px 10px",zIndex:998,pointerEvents:"none"}}>
@@ -2106,7 +2113,7 @@ function LightingTimeline() {
         <div style={{flex:1}}/>
         <button onClick={()=>setLoopEnabled(v=>!v)} style={{background:loopEnabled?"#162a1e":"#1e222a",border:"1px solid "+(loopEnabled?"#44ffaa66":"#2e3340"),color:loopEnabled?"#44ffaa":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u21BB"} LOOP</button>
         <button onClick={()=>setSnapToGrid(v=>!v)} style={{background:snapToGrid?"#162030":"#1e222a",border:"1px solid "+(snapToGrid?"#4488ff66":"#2e3340"),color:snapToGrid?"#4488ff":"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11}}>{"\u25A6"} SNAP</button>
-        {[{id:"select",icon:"\u2190"},{id:"draw",icon:"\u270E"},{id:"erase",icon:"\u2716"}].map(t=>(
+        {[{id:"select",icon:"\u2190"},{id:"draw",icon:"\u270E"}].map(t=>(
           <button key={t.id} onClick={()=>setTool(t.id)} style={{background:t.id==="erase"&&tool===t.id?"linear-gradient(135deg,#3a1a1a,#662222aa,#3a1a1a)":(t.id==="select"&&tool===t.id?"linear-gradient(135deg,#1a2a1a,#44ffaa33,#1a2a1a)":(tool===t.id?"#e8aa22":"#1e222a")),backgroundSize:(t.id==="erase"||t.id==="select")&&tool===t.id?"400% 100%":"auto",border:"1px solid "+(t.id==="erase"&&tool===t.id?"#ff4444":t.id==="select"&&tool===t.id?"#44ffaa":tool===t.id?"#e8aa22":"#2e3340"),color:t.id==="erase"&&tool===t.id?"#ff4444":(t.id==="select"&&tool===t.id?"#44ffaa":(tool===t.id?"#111":"#777")),borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,animation:t.id==="erase"&&tool===t.id?"eraseglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":(t.id==="select"&&tool===t.id?"selectglow 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite":"none"),transition:"all 0.3s ease",boxShadow:t.id==="select"&&tool===t.id?"0 0 12px #44ffaa44, inset 0 0 8px #44ffaa22":"none"}}>{t.icon}</button>
         ))}
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCues(null);}else{setCopyMode(true);const sel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):selectedCue?cues.filter(c=>c.id===selectedCue):[];if(sel.length>0){setCopiedCues(sel.map(c=>({...c,id:null})));}}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCues?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCues?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCues?`PASTE (${copiedCues.length})`:"COPY"):"COPY"}</button>
@@ -2134,7 +2141,7 @@ function LightingTimeline() {
       <AudioControlBar audioMode={audioMode} setAudioMode={setAudioMode} audioFileName={audioFileName} audioLevel={audioLevel} beatDetected={beatDetected} detectedBpm={detectedBpm} audioVolume={audioVolume} setAudioVolume={setAudioVolume} audioMuted={audioMuted} setAudioMuted={setAudioMuted} onFileLoad={f=>audioEngine.loadFile(f)} bpm={bpm} setBpm={setBpm}/>
 
       <div style={{display:"flex",flex:1,overflow:"hidden"}}>
-        <div ref={timelineRef} onMouseDown={handleGridMouseDown} onScroll={e=>setScrollLeft(e.target.scrollLeft)} style={{flex:1,overflow:"auto",position:"relative",cursor:copyMode?(copiedCues?"copy":"cell"):tool==="draw"?"crosshair":tool==="erase"?"not-allowed":"default"}}>
+        <div ref={timelineRef} onMouseDown={handleGridMouseDown} onTouchStart={handleGridTouchStart} onScroll={e=>setScrollLeft(e.target.scrollLeft)} style={{flex:1,overflow:"auto",position:"relative",cursor:copyMode?(copiedCues?"copy":"cell"):tool==="draw"?"crosshair":tool==="erase"?"not-allowed":"default"}}>
           <div style={{width:LABEL_W+PARAM_LABEL_W+totalW,minHeight:(RULER_H+(waveformPeaks?40:0))+totalH}}>
             <div style={{position:"sticky",top:0,zIndex:20,width:LABEL_W+PARAM_LABEL_W+totalW,background:"#161a28",borderBottom:"1px solid #1e2a44"}}>
               <div style={{height:RULER_H,display:"flex"}}>
@@ -2246,7 +2253,7 @@ function LightingTimeline() {
                         const cueH=row.h-4;
                         const cc=isCueMuted?"#ff4444":param.color;
                         return(
-                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,opacity:isMuted?0.2:isCueMuted?0.55:1,background:isSel?`linear-gradient(180deg,${cc}55,${cc}22)`:isActive?`linear-gradient(180deg,${cc}33,${cc}11)`:`linear-gradient(180deg,${cc}22,${cc}08)`,border:isSel?`1px solid ${cc}`:`1px solid ${cc}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${cc}66`:isActive?`0 0 8px ${cc}44`:"none",zIndex:isSel?3:1}}>
+                          <div key={cue.id} data-cue={cue.id} onMouseDown={e=>handleCueMouseDown(e,cue)} onTouchStart={e=>handleCueTouchStart(e,cue)} style={{position:"absolute",left:beatToX(cue.beat)+1,width:cueW,top:2,height:cueH,opacity:isMuted?0.2:isCueMuted?0.55:1,background:isSel?`linear-gradient(180deg,${cc}55,${cc}22)`:isActive?`linear-gradient(180deg,${cc}33,${cc}11)`:`linear-gradient(180deg,${cc}22,${cc}08)`,border:isSel?`1px solid ${cc}`:`1px solid ${cc}44`,borderRadius:3,cursor:tool==="erase"?"not-allowed":"grab",overflow:"hidden",boxShadow:isSel?`0 0 6px ${cc}66`:isActive?`0 0 8px ${cc}44`:"none",zIndex:isSel?3:1}}>
                             <CurvePath cue={cue} w={cueW} h={cueH} color={cc} isActive={isActive}/>
                             <div style={{position:"absolute",top:2,left:3,fontSize:7,color:cc,opacity:isActive?0.9:0.5,pointerEvents:"none"}}>{isCueMuted?"\uD83D\uDD07":EASINGS[cue.easing||"linear"].icon}</div>
                             <div style={{position:"absolute",bottom:2,left:3,fontSize:8,color:"#fff",opacity:isCueMuted?0.4:0.8,pointerEvents:"none",whiteSpace:"nowrap"}}>{cue.value}{param.unit}</div>
@@ -2267,7 +2274,7 @@ function LightingTimeline() {
         <div style={{width:rightPanelWide?440:220,background:"#141e14",borderLeft:"1px solid #1e3a1e",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden",transition:"width 0.2s ease"}}>
           <div style={{display:"flex",borderBottom:"1px solid #252930"}}>
             {[{id:"cue",label:"CUE"},{id:"fx",label:"FX"},{id:"seq",label:"SEQ"},{id:"out",label:"OUT"}].map(tab=>(
-              <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1a2a1a":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #44cc44":"2px solid transparent",color:rightTab===tab.id?"#44cc44":"#3a3f4c",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
+              <button key={tab.id} onClick={()=>{if(rightTab===tab.id){setRightPanelWide(w=>!w);}else{setRightTab(tab.id);setRightPanelWide(false);}}} style={{flex:1,padding:"7px 0",fontSize:9,letterSpacing:2,background:rightTab===tab.id?"#1a2a1a":"#141820",border:"none",borderBottom:rightTab===tab.id?"2px solid #44cc44":"2px solid transparent",color:rightTab===tab.id?"#66ff66":"#6a7a6a",cursor:"pointer",fontWeight:rightTab===tab.id?"bold":"normal"}}>{tab.label}</button>
             ))}
           </div>
           <div style={{flex:1,overflowY:"auto"}}>
@@ -3163,7 +3170,7 @@ function LightingTimeline() {
                     <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='type_dropdown'&&prev.fxId===fx.id?null:{field:'type_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:100,background:"#080a0e",border:"1px solid "+(keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id?"#e8aa22":"#1e222a"),color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10,cursor:"pointer",userSelect:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fx.type} ({(DMX_PROFILES[fx.type]||{channels:"?"}).channels}ch)</div>
                     {keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id&&(<>
                       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
-                      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-320),left:keypadState.rect.left,zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:6,padding:4,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:300,overflowY:"auto",width:220,display:"flex",flexDirection:"column",gap:1}}>
+                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-420),left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:400,overflowY:"auto",width:300,display:"flex",flexDirection:"column",gap:3,WebkitOverflowScrolling:"touch"}}>
                         {Object.keys(DMX_PROFILES).filter(t=>!hiddenProfiles.has(t)).map(t=>{
                           const isCore = CORE_PROFILES.has(t);
                           const isBuiltin = BUILTIN_PROFILES.has(t);
@@ -3171,10 +3178,10 @@ function LightingTimeline() {
                           const isSel = fx.type===t;
                           const selColor = isCustom ? "#ffaa44" : "#e8aa22";
                           return (
-                            <div key={t} style={{padding:"3px 6px",fontSize:10,color:isSel?selColor:"#ccc",background:isSel?selColor+"18":"transparent",borderRadius:3,display:"flex",alignItems:"center",gap:4}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?selColor+"18":"transparent";}}>
-                              <span onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));setKeypadState(null);}} style={{flex:1,cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t}>{t} <span style={{fontSize:8,color:"#666"}}>{DMX_PROFILES[t].channels}ch</span></span>
-                              {isCustom && <button onClick={e=>{e.stopPropagation();const prof=DMX_PROFILES[t];if(!prof)return;setBuilderEditName(t);setBuilderName(t);setBuilderColor(TYPE_COLORS[t]||"#888888");setBuilderParams(Object.entries(prof.map).map(([pid,m])=>({paramId:pid,offset:m.offset,bits:m.bits})));setKeypadState(null);setFixtureBuilderOpen(true);}} style={{width:18,height:18,background:"none",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:2,cursor:"pointer",fontSize:7,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}} title="Edit">✎</button>}
-                              <button onClick={e=>{e.stopPropagation();const visible=Object.keys(DMX_PROFILES).filter(k=>!hiddenProfiles.has(k));if(visible.length<=1)return alert("Cannot remove the last fixture type.");const fallback=visible.find(k=>k!==t)||"SPOT";if(!confirm("Remove '"+t+"' from fixture types?"+(fixtures.some(f=>f.type===t)?"\nFixtures using it will change to "+fallback+".":"")))return;if(isCustom){delete DMX_PROFILES[t];delete TYPE_COLORS[t];let custom={};try{custom=JSON.parse(localStorage.getItem("lumina-custom-profiles")||"{}");}catch(ee){}delete custom[t];localStorage.setItem("lumina-custom-profiles",JSON.stringify(custom));}else{setHiddenProfiles(prev=>{const s=new Set(prev);s.add(t);localStorage.setItem("lumina-hidden-profiles",JSON.stringify([...s]));return s;});}setFixtures(prev=>prev.map(f=>f.type===t?{...f,type:fallback,color:TYPE_COLORS[fallback]||f.color}:f));setCustomProfilesVer(v=>v+1);setKeypadState(null);}} style={{width:18,height:18,background:"none",border:"1px solid #ff444444",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}} title="Remove from list">✕</button>
+                            <div key={t} style={{padding:"10px 10px",fontSize:13,color:isSel?selColor:"#ccc",background:isSel?selColor+"18":"transparent",borderRadius:5,display:"flex",alignItems:"center",gap:8,minHeight:44,touchAction:"manipulation"}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?selColor+"18":"transparent";}}>
+                              <span onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));setKeypadState(null);}} style={{flex:1,cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t}>{t} <span style={{fontSize:10,color:"#666"}}>{DMX_PROFILES[t].channels}ch</span></span>
+                              {isCustom && <button onClick={e=>{e.stopPropagation();const prof=DMX_PROFILES[t];if(!prof)return;setBuilderEditName(t);setBuilderName(t);setBuilderColor(TYPE_COLORS[t]||"#888888");setBuilderParams(Object.entries(prof.map).map(([pid,m])=>({paramId:pid,offset:m.offset,bits:m.bits})));setKeypadState(null);setFixtureBuilderOpen(true);}} style={{width:36,height:36,background:"none",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:4,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0,touchAction:"manipulation"}} title="Edit">✎</button>}
+                              <button onClick={e=>{e.stopPropagation();const visible=Object.keys(DMX_PROFILES).filter(k=>!hiddenProfiles.has(k));if(visible.length<=1)return alert("Cannot remove the last fixture type.");const fallback=visible.find(k=>k!==t)||"SPOT";if(!confirm("Remove '"+t+"' from fixture types?"+(fixtures.some(f=>f.type===t)?"\nFixtures using it will change to "+fallback+".":"")))return;if(isCustom){delete DMX_PROFILES[t];delete TYPE_COLORS[t];let custom={};try{custom=JSON.parse(localStorage.getItem("lumina-custom-profiles")||"{}");}catch(ee){}delete custom[t];localStorage.setItem("lumina-custom-profiles",JSON.stringify(custom));}else{setHiddenProfiles(prev=>{const s=new Set(prev);s.add(t);localStorage.setItem("lumina-hidden-profiles",JSON.stringify([...s]));return s;});}setFixtures(prev=>prev.map(f=>f.type===t?{...f,type:fallback,color:TYPE_COLORS[fallback]||f.color}:f));setCustomProfilesVer(v=>v+1);setKeypadState(null);}} style={{width:36,height:36,background:"none",border:"1px solid #ff444444",color:"#ff5544",borderRadius:4,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0,touchAction:"manipulation"}} title="Remove from list">✕</button>
                             </div>
                           );
                         })}
@@ -3185,13 +3192,13 @@ function LightingTimeline() {
                     <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='pos_dropdown'&&prev.fxId===fx.id?null:{field:'pos_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:"#080a0e",border:"1px solid "+(keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id?POSITION_COLORS[fx.position||"FRONT 1"]||"#888":"#1e222a"),color:POSITION_COLORS[fx.position||"FRONT 1"]||"#888",borderRadius:2,padding:"3px 4px",fontSize:9,cursor:"pointer",userSelect:"none"}}>{fx.position||"FRONT 1"}</div>
                     {keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id&&(<>
                       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
-                      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-280),left:keypadState.rect.left,zIndex:10002,background:"#141820",border:"1px solid #44ffaa44",borderRadius:6,padding:4,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:140,display:"flex",flexDirection:"column",gap:1}}>
+                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-420),left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-208)),zIndex:10002,background:"#141820",border:"1px solid #44ffaa44",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:400,overflowY:"auto",width:200,display:"flex",flexDirection:"column",gap:3,WebkitOverflowScrolling:"touch"}}>
                         {FIXTURE_POSITIONS.map(p=>{
                           const posCol=POSITION_COLORS[p]||"#888";
                           const isSel=(fx.position||"FRONT 1")===p;
                           return (
-                            <div key={p} onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,position:p}:f));setKeypadState(null);}} style={{padding:"4px 8px",fontSize:10,color:isSel?posCol:"#ccc",background:isSel?posCol+"18":"transparent",borderRadius:3,cursor:"pointer",display:"flex",alignItems:"center",gap:6}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?posCol+"18":"transparent";}}>
-                              <div style={{width:6,height:6,borderRadius:"50%",background:posCol,flexShrink:0}}/>
+                            <div key={p} onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,position:p}:f));setKeypadState(null);}} style={{padding:"10px 12px",fontSize:13,color:isSel?posCol:"#ccc",background:isSel?posCol+"18":"transparent",borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",gap:10,minHeight:44,touchAction:"manipulation"}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?posCol+"18":"transparent";}}>
+                              <div style={{width:10,height:10,borderRadius:"50%",background:posCol,flexShrink:0}}/>
                               <span>{p}</span>
                             </div>
                           );
