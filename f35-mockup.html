@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>LUMINA FX — F-35 HUD Concept</title>
+<style>
+  @font-face { font-family: 'JetBrains'; src: url('file:///Users/shaishtarker/Library/Application%20Support/Claude/local-agent-mode-sessions/skills-plugin/5bfbead8-3571-4367-9b29-b99519122d1f/83440a7f-4664-466a-9c3f-56e69fee752d/skills/canvas-design/canvas-fonts/JetBrainsMono-Regular.ttf'); }
+  @font-face { font-family: 'JetBrains'; src: url('file:///Users/shaishtarker/Library/Application%20Support/Claude/local-agent-mode-sessions/skills-plugin/5bfbead8-3571-4367-9b29-b99519122d1f/83440a7f-4664-466a-9c3f-56e69fee752d/skills/canvas-design/canvas-fonts/JetBrainsMono-Bold.ttf'); font-weight: bold; }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: #0a0c10;
+    color: #e8aa22;
+    font-family: 'JetBrains', 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    width: 1920px;
+    height: 1200px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* === CORNER BRACKET MIXIN === */
+  .bracket-box {
+    position: relative;
+  }
+  .bracket-box::before,
+  .bracket-box::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+  }
+  .bracket-box::before {
+    top: -1px; left: -1px;
+    border-top: 2px solid #e8aa22;
+    border-left: 2px solid #e8aa22;
+  }
+  .bracket-box::after {
+    top: -1px; right: -1px;
+    border-top: 2px solid #e8aa22;
+    border-right: 2px solid #e8aa22;
+  }
+  .bracket-box .bl, .bracket-box .br {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    bottom: -1px;
+    pointer-events: none;
+  }
+  .bracket-box .bl {
+    left: -1px;
+    border-bottom: 2px solid #e8aa22;
+    border-left: 2px solid #e8aa22;
+  }
+  .bracket-box .br {
+    right: -1px;
+    border-bottom: 2px solid #e8aa22;
+    border-right: 2px solid #e8aa22;
+  }
+
+  /* Green bracket variant */
+  .bracket-green::before { border-color: #44ffaa; }
+  .bracket-green::after { border-color: #44ffaa; }
+  .bracket-green .bl { border-color: #44ffaa; }
+  .bracket-green .br { border-color: #44ffaa; }
+
+  /* Cyan bracket variant */
+  .bracket-cyan::before { border-color: #44aaff; }
+  .bracket-cyan::after { border-color: #44aaff; }
+  .bracket-cyan .bl { border-color: #44aaff; }
+  .bracket-cyan .br { border-color: #44aaff; }
+
+  /* === TOP BAR === */
+  .top-bar {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    border-bottom: 1px solid #1a1c22;
+    position: relative;
+  }
+  .top-bar .logo {
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 4px;
+    text-shadow: 0 0 12px rgba(232,170,34,0.5);
+  }
+  .top-bar .indicators {
+    display: flex;
+    gap: 32px;
+    margin-left: auto;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #8a7a44;
+  }
+  .top-bar .indicators .val {
+    color: #e8aa22;
+    text-shadow: 0 0 6px rgba(232,170,34,0.3);
+  }
+  .top-bar::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #e8aa2244, #e8aa2288, #e8aa2244, transparent);
+  }
+
+  /* === MAIN LAYOUT === */
+  .main {
+    display: flex;
+    height: calc(1200px - 48px - 200px);
+  }
+
+  /* === LEFT PANEL: TIMELINE === */
+  .timeline-panel {
+    flex: 1;
+    padding: 16px;
+    position: relative;
+  }
+  .timeline-header {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: #44aaff;
+    margin-bottom: 12px;
+    opacity: 0.7;
+  }
+
+  .fixture-list {
+    width: 120px;
+    position: absolute;
+    top: 48px;
+    left: 16px;
+  }
+  .fixture-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #667788;
+    border-bottom: 1px solid #0f1118;
+  }
+  .fixture-item.active { color: #e8aa22; }
+  .fixture-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #1a2a1a;
+  }
+  .fixture-item.active .fixture-dot {
+    background: #44ffaa;
+    box-shadow: 0 0 8px rgba(68,255,170,0.6);
+  }
+
+  /* Timeline grid area */
+  .timeline-grid {
+    position: absolute;
+    top: 48px;
+    left: 152px;
+    right: 320px;
+    bottom: 16px;
+  }
+
+  /* Beat ruler */
+  .beat-ruler {
+    display: flex;
+    height: 24px;
+    border-bottom: 1px solid #1a1c22;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: #44aaff;
+    opacity: 0.6;
+  }
+  .beat-num {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid #111420;
+    position: relative;
+  }
+  .beat-num::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    height: 4px;
+    background: #44aaff44;
+  }
+
+  /* Grid lanes */
+  .lane {
+    height: 32px;
+    border-bottom: 1px solid #0d0f16;
+    position: relative;
+  }
+
+  /* Cue blocks */
+  .cue-block {
+    position: absolute;
+    height: 22px;
+    top: 5px;
+    border: 1px solid #44ffaa;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: 0 0 6px rgba(68,255,170,0.15), inset 0 0 8px rgba(68,255,170,0.05);
+  }
+  .cue-block .cue-label {
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: #44ffaa;
+    padding: 2px 4px;
+    opacity: 0.8;
+  }
+
+  /* Vertical grid lines */
+  .vgrid {
+    position: absolute;
+    top: 24px;
+    bottom: 0;
+    width: 1px;
+    background: #111420;
+  }
+
+  /* Playhead */
+  .playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #ff4444;
+    box-shadow: 0 0 12px rgba(255,68,68,0.5);
+    z-index: 10;
+  }
+  .playhead::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 10px;
+    height: 10px;
+    background: #ff4444;
+    clip-path: polygon(50% 100%, 0 0, 100% 0);
+  }
+
+  /* === RIGHT PANEL === */
+  .right-panel {
+    width: 300px;
+    padding: 16px;
+    border-left: 1px solid #111420;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 20px;
+  }
+  .tab {
+    flex: 1;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 8px 4px;
+    color: #445566;
+    cursor: pointer;
+    position: relative;
+  }
+  .tab.active {
+    color: #44ffaa;
+    text-shadow: 0 0 8px rgba(68,255,170,0.4);
+  }
+  .tab.active::before {
+    content: '[ ';
+    color: #44ffaa88;
+  }
+  .tab.active::after {
+    content: ' ]';
+    color: #44ffaa88;
+  }
+  .tab.active .tab-underline {
+    position: absolute;
+    bottom: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: #44ffaa;
+    box-shadow: 0 0 6px rgba(68,255,170,0.5);
+  }
+
+  /* Slider rows */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 14px;
+    gap: 12px;
+  }
+  .slider-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #556677;
+    width: 50px;
+    text-align: right;
+  }
+  .slider-track {
+    flex: 1;
+    height: 1px;
+    background: #1a2030;
+    position: relative;
+  }
+  .slider-fill {
+    height: 1px;
+    background: #e8aa22;
+    box-shadow: 0 0 4px rgba(232,170,34,0.4);
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  .slider-thumb {
+    position: absolute;
+    top: -5px;
+    width: 2px;
+    height: 11px;
+    background: #e8aa22;
+    box-shadow: 0 0 6px rgba(232,170,34,0.5);
+  }
+  .slider-thumb::before {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: -4px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #e8aa22;
+  }
+  .slider-value {
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: #e8aa22;
+    width: 44px;
+    text-align: right;
+    text-shadow: 0 0 8px rgba(232,170,34,0.3);
+  }
+
+  /* Section headers in right panel */
+  .section-header {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: #44aaff;
+    margin: 20px 0 12px;
+    opacity: 0.5;
+    border-bottom: 1px solid #111420;
+    padding-bottom: 4px;
+  }
+
+  /* === BOTTOM SECTION === */
+  .bottom-section {
+    height: 200px;
+    display: flex;
+    border-top: 1px solid #1a1e2a;
+    background: #0c0e14;
+    position: relative;
+  }
+  .bottom-section::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #e8aa2233, #e8aa2266, #e8aa2233, transparent);
+  }
+
+  /* KEYPAD GRID */
+  .keypad-area {
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .keypad-area-label {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: #44aaff;
+    opacity: 0.5;
+    margin-bottom: 2px;
+  }
+  .keypad-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 64px);
+    grid-template-rows: repeat(2, 56px);
+    gap: 6px;
+  }
+  .pad {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: #445566;
+    cursor: pointer;
+    gap: 2px;
+  }
+  .pad .pad-sub {
+    font-size: 7px;
+    letter-spacing: 1px;
+    font-weight: normal;
+    opacity: 0.6;
+  }
+  .pad.active { color: #e8aa22; text-shadow: 0 0 10px rgba(232,170,34,0.4); }
+  .pad.active-green { color: #44ffaa; text-shadow: 0 0 10px rgba(68,255,170,0.4); }
+  .pad.active-red { color: #ff4444; text-shadow: 0 0 10px rgba(255,68,68,0.4); }
+  .pad.active-cyan { color: #44aaff; text-shadow: 0 0 10px rgba(68,170,255,0.4); }
+  /* Corner brackets on pads */
+  .pad::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 10px; height: 10px;
+    border-top: 2px solid #334466;
+    border-left: 2px solid #334466;
+  }
+  .pad::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 10px; height: 10px;
+    border-top: 2px solid #334466;
+    border-right: 2px solid #334466;
+  }
+  .pad .pbl {
+    position: absolute;
+    bottom: 0; left: 0;
+    width: 10px; height: 10px;
+    border-bottom: 2px solid #334466;
+    border-left: 2px solid #334466;
+  }
+  .pad .pbr {
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 10px; height: 10px;
+    border-bottom: 2px solid #334466;
+    border-right: 2px solid #334466;
+  }
+  .pad.active::before { border-color: #e8aa22; }
+  .pad.active::after { border-color: #e8aa22; }
+  .pad.active .pbl { border-color: #e8aa22; }
+  .pad.active .pbr { border-color: #e8aa22; }
+  .pad.active-green::before { border-color: #44ffaa; }
+  .pad.active-green::after { border-color: #44ffaa; }
+  .pad.active-green .pbl { border-color: #44ffaa; }
+  .pad.active-green .pbr { border-color: #44ffaa; }
+  .pad.active-red::before { border-color: #ff4444; }
+  .pad.active-red::after { border-color: #ff4444; }
+  .pad.active-red .pbl { border-color: #ff4444; }
+  .pad.active-red .pbr { border-color: #ff4444; }
+  .pad.active-cyan::before { border-color: #44aaff; }
+  .pad.active-cyan::after { border-color: #44aaff; }
+  .pad.active-cyan .pbl { border-color: #44aaff; }
+  .pad.active-cyan .pbr { border-color: #44aaff; }
+
+  /* KEYBOARD SHORTCUTS */
+  .keyboard-area {
+    flex: 1;
+    padding: 12px 24px;
+    border-left: 1px solid #111420;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .keyboard-area-label {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: #44aaff;
+    opacity: 0.5;
+    margin-bottom: 4px;
+  }
+  .key-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .key {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid #2a3050;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: #556688;
+    position: relative;
+  }
+  .key.active-key {
+    border-color: #e8aa2266;
+    color: #e8aa22;
+    background: rgba(232,170,34,0.05);
+    box-shadow: 0 0 8px rgba(232,170,34,0.1);
+  }
+  .key.wide { min-width: 56px; }
+  .key.wider { min-width: 72px; }
+  .key.space-key { min-width: 200px; }
+  .key-hint {
+    font-size: 7px;
+    letter-spacing: 1px;
+    color: #334455;
+    margin-left: 10px;
+  }
+  .key-hint .kh-val { color: #667788; }
+
+  /* MASTER + TRANSPORT section */
+  .master-area {
+    width: 160px;
+    padding: 12px 20px;
+    border-left: 1px solid #111420;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  /* Scan line overlay */
+  .scanlines {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    z-index: 100;
+  }
+
+  /* Vignette */
+  .vignette {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%);
+    z-index: 99;
+  }
+
+  /* Parameter sub-labels */
+  .param-sublabel {
+    position: absolute;
+    left: -128px;
+    width: 120px;
+    text-align: right;
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: #334455;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .param-sublabel.active { color: #667788; }
+
+  /* Effect indicator */
+  .fx-indicator {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .fx-on { background: #44ffaa; box-shadow: 0 0 6px rgba(68,255,170,0.5); }
+  .fx-off { background: #1a1a2a; }
+
+  /* Status readouts */
+  .status-block {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-block .label {
+    color: #556644;
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+
+  /* Right panel info blocks */
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #0d0f16;
+  }
+  .info-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #445566;
+  }
+  .info-value {
+    font-size: 12px;
+    color: #e8aa22;
+  }
+  .info-value.cyan { color: #44aaff; }
+  .info-value.green { color: #44ffaa; }
+
+  /* Decorative crosshair */
+  .crosshair {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+  }
+  .crosshair::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e8aa2233;
+  }
+  .crosshair::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #e8aa2233;
+  }
+</style>
+</head>
+<body>
+
+<!-- Scan line overlay -->
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+  <div class="logo">[ LUMINA FX ]</div>
+  <div class="indicators">
+    <div class="status-block"><span class="label">BPM</span> <span class="val">120</span></div>
+    <div class="status-block"><span class="label">BEAT</span> <span class="val">003:1</span></div>
+    <div class="status-block">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#44ffaa;box-shadow:0 0 8px rgba(68,255,170,0.6);margin-right:4px;"></span>
+      <span class="label">SYNC</span>
+    </div>
+    <div class="status-block"><span class="label">IN</span> <span class="val">0</span></div>
+    <div class="status-block"><span class="label">OUT</span> <span class="val">16</span></div>
+    <div class="status-block"><span class="label">NET</span> <span class="val" style="color:#44ffaa;">OK</span></div>
+    <div class="status-block"><span class="label">FPS</span> <span class="val" style="color:#44aaff;">44</span></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT: TIMELINE -->
+  <div class="timeline-panel">
+    <div class="timeline-header">TIMELINE — CUE EDITOR</div>
+
+    <!-- Fixture list -->
+    <div class="fixture-list">
+      <div class="fixture-item active"><span class="fixture-dot"></span> SPOT 1</div>
+      <div class="fixture-item active"><span class="fixture-dot"></span> SPOT 2</div>
+      <div class="fixture-item"><span class="fixture-dot"></span> SPOT 3</div>
+      <div class="fixture-item active"><span class="fixture-dot"></span> WASH 1</div>
+      <div class="fixture-item"><span class="fixture-dot"></span> WASH 2</div>
+      <div class="fixture-item active"><span class="fixture-dot"></span> BEAM 1</div>
+      <div class="fixture-item"><span class="fixture-dot"></span> BEAM 2</div>
+      <div class="fixture-item"><span class="fixture-dot"></span> LED BAR</div>
+
+      <!-- Sub params (indented) -->
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">DIM</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">PAN</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">TILT</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">ZOOM</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">C</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">M</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">Y</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">GOBO A</div>
+      <div class="fixture-item" style="padding-left:20px;font-size:9px;color:#3a4455;">IRIS</div>
+    </div>
+
+    <!-- Timeline grid -->
+    <div class="timeline-grid">
+      <!-- Beat ruler -->
+      <div class="beat-ruler">
+        <div class="beat-num">1</div>
+        <div class="beat-num">2</div>
+        <div class="beat-num">3</div>
+        <div class="beat-num">4</div>
+        <div class="beat-num">1</div>
+        <div class="beat-num">2</div>
+        <div class="beat-num">3</div>
+        <div class="beat-num">4</div>
+        <div class="beat-num">1</div>
+        <div class="beat-num">2</div>
+        <div class="beat-num">3</div>
+        <div class="beat-num">4</div>
+        <div class="beat-num">1</div>
+        <div class="beat-num">2</div>
+        <div class="beat-num">3</div>
+        <div class="beat-num">4</div>
+      </div>
+
+      <!-- Vertical grid lines -->
+      <div class="vgrid" style="left:25%"></div>
+      <div class="vgrid" style="left:50%"></div>
+      <div class="vgrid" style="left:75%"></div>
+
+      <!-- Lanes -->
+      <div class="lane">
+        <div class="cue-block" style="left:2%;width:22%"><span class="cue-label">DIM 100</span></div>
+        <div class="cue-block" style="left:52%;width:18%"><span class="cue-label">DIM 80</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:5%;width:30%"><span class="cue-label">DIM 100</span></div>
+        <div class="cue-block" style="left:60%;width:25%"><span class="cue-label">DIM 60</span></div>
+      </div>
+      <div class="lane"></div>
+      <div class="lane">
+        <div class="cue-block" style="left:0%;width:95%;border-color:#44aaff;"><span class="cue-label" style="color:#44aaff;">DIM 100</span></div>
+      </div>
+      <div class="lane"></div>
+      <div class="lane">
+        <div class="cue-block" style="left:25%;width:50%"><span class="cue-label">DIM 100</span></div>
+      </div>
+      <div class="lane"></div>
+      <div class="lane"></div>
+
+      <!-- Expanded param lanes -->
+      <div class="lane">
+        <div class="cue-block" style="left:2%;width:22%;border-color:#e8aa22;"><span class="cue-label" style="color:#e8aa22;">255</span></div>
+        <div class="cue-block" style="left:52%;width:18%;border-color:#e8aa22;"><span class="cue-label" style="color:#e8aa22;">200</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:2%;width:22%;border-color:#44aaff;"><span class="cue-label" style="color:#44aaff;">127</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:2%;width:22%;border-color:#44aaff;"><span class="cue-label" style="color:#44aaff;">200</span></div>
+        <div class="cue-block" style="left:52%;width:30%;border-color:#44aaff;"><span class="cue-label" style="color:#44aaff;">64</span></div>
+      </div>
+      <div class="lane"></div>
+      <div class="lane">
+        <div class="cue-block" style="left:25%;width:50%;border-color:#44ffaa;"><span class="cue-label" style="color:#44ffaa;">180</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:25%;width:50%;border-color:#44ffaa;"><span class="cue-label" style="color:#44ffaa;">90</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:25%;width:50%;border-color:#44ffaa;"><span class="cue-label" style="color:#44ffaa;">45</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:10%;width:35%;border-color:#e8aa22;"><span class="cue-label" style="color:#e8aa22;">GOBO 3</span></div>
+      </div>
+      <div class="lane">
+        <div class="cue-block" style="left:40%;width:20%;border-color:#e8aa22;"><span class="cue-label" style="color:#e8aa22;">128</span></div>
+      </div>
+
+      <!-- Playhead -->
+      <div class="playhead" style="left:38%"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active">CUE<div class="tab-underline"></div></div>
+      <div class="tab">FX</div>
+      <div class="tab">SEQ</div>
+      <div class="tab">OUT</div>
+    </div>
+
+    <!-- Cue properties -->
+    <div class="section-header">CUE PROPERTIES</div>
+
+    <div class="slider-row">
+      <span class="slider-label">DIM</span>
+      <div class="slider-track">
+        <div class="slider-fill" style="width:78%"></div>
+        <div class="slider-thumb" style="left:78%"></div>
+      </div>
+      <span class="slider-value">200</span>
+    </div>
+
+    <div class="slider-row">
+      <span class="slider-label">PAN</span>
+      <div class="slider-track">
+        <div class="slider-fill" style="width:50%"></div>
+        <div class="slider-thumb" style="left:50%"></div>
+      </div>
+      <span class="slider-value">127</span>
+    </div>
+
+    <div class="slider-row">
+      <span class="slider-label">TILT</span>
+      <div class="slider-track">
+        <div class="slider-fill" style="width:65%"></div>
+        <div class="slider-thumb" style="left:65%"></div>
+      </div>
+      <span class="slider-value">166</span>
+    </div>
+
+    <div class="slider-row">
+      <span class="slider-label">ZOOM</span>
+      <div class="slider-track">
+        <div class="slider-fill" style="width:35%"></div>
+        <div class="slider-thumb" style="left:35%"></div>
+      </div>
+      <span class="slider-value">089</span>
+    </div>
+
+    <div class="slider-row">
+      <span class="slider-label">IRIS</span>
+      <div class="slider-track">
+        <div class="slider-fill" style="width:100%"></div>
+        <div class="slider-thumb" style="left:100%"></div>
+      </div>
+      <span class="slider-value">255</span>
+    </div>
+
+    <!-- Timing -->
+    <div class="section-header">TIMING</div>
+    <div class="info-row">
+      <span class="info-label">FADE IN</span>
+      <span class="info-value cyan">0.5s</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">HOLD</span>
+      <span class="info-value cyan">2.0s</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">FADE OUT</span>
+      <span class="info-value cyan">1.0s</span>
+    </div>
+
+    <!-- FX Status -->
+    <div class="section-header">ACTIVE EFFECTS</div>
+    <div class="info-row">
+      <span class="info-label"><span class="fx-indicator fx-on"></span>SINE — DIM</span>
+      <span class="info-value green">RUN</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label"><span class="fx-indicator fx-on"></span>BALLYHOO</span>
+      <span class="info-value green">RUN</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label"><span class="fx-indicator fx-off"></span>FLY TILT</span>
+      <span class="info-value" style="color:#445566;">OFF</span>
+    </div>
+
+    <!-- Output status -->
+    <div class="section-header">OUTPUT</div>
+    <div class="info-row">
+      <span class="info-label">ARTNET</span>
+      <span class="info-value green">LIVE</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">UNIVERSES</span>
+      <span class="info-value">16</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">DMX RATE</span>
+      <span class="info-value cyan">44 Hz</span>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM SECTION -->
+<div class="bottom-section">
+
+  <!-- KEYPAD GRID -->
+  <div class="keypad-area">
+    <div class="keypad-area-label">FIXTURE PADS</div>
+    <div class="keypad-grid">
+      <!-- Row 1: Fixtures 1-8 -->
+      <div class="pad active">
+        <span>1</span><span class="pad-sub">SPOT 1</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active">
+        <span>2</span><span class="pad-sub">SPOT 2</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>3</span><span class="pad-sub">SPOT 3</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active">
+        <span>4</span><span class="pad-sub">WASH 1</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>5</span><span class="pad-sub">WASH 2</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active">
+        <span>6</span><span class="pad-sub">BEAM 1</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>7</span><span class="pad-sub">BEAM 2</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>8</span><span class="pad-sub">LED BAR</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+
+      <!-- Row 2: Sequence / Scene triggers -->
+      <div class="pad active-green">
+        <span>S1</span><span class="pad-sub">INTRO</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active-green">
+        <span>S2</span><span class="pad-sub">VERSE</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active-red">
+        <span>S3</span><span class="pad-sub">DROP</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>S4</span><span class="pad-sub">BRIDGE</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active-cyan">
+        <span>S5</span><span class="pad-sub">CHORUS</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>S6</span><span class="pad-sub">BUILD</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad">
+        <span>S7</span><span class="pad-sub">OUTRO</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+      <div class="pad active-red">
+        <span>S8</span><span class="pad-sub">BLKOUT</span>
+        <div class="pbl"></div><div class="pbr"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KEYBOARD SHORTCUTS -->
+  <div class="keyboard-area">
+    <div class="keyboard-area-label">KEYBOARD MAP</div>
+
+    <!-- Row 1: Number keys -->
+    <div class="key-row">
+      <div class="key active-key">1</div>
+      <div class="key active-key">2</div>
+      <div class="key">3</div>
+      <div class="key active-key">4</div>
+      <div class="key">5</div>
+      <div class="key active-key">6</div>
+      <div class="key">7</div>
+      <div class="key">8</div>
+      <div class="key">9</div>
+      <div class="key">0</div>
+      <div class="key-hint"><span class="kh-val">FIXTURE SELECT</span></div>
+    </div>
+
+    <!-- Row 2: QWERTY -->
+    <div class="key-row">
+      <div class="key active-key">Q</div>
+      <div class="key active-key">W</div>
+      <div class="key active-key">E</div>
+      <div class="key active-key">R</div>
+      <div class="key">T</div>
+      <div class="key">Y</div>
+      <div class="key">U</div>
+      <div class="key">I</div>
+      <div class="key">O</div>
+      <div class="key">P</div>
+      <div class="key-hint"><span class="kh-val">SEQ TRIGGERS</span></div>
+    </div>
+
+    <!-- Row 3: ASDF -->
+    <div class="key-row">
+      <div class="key active-key">A</div>
+      <div class="key">S</div>
+      <div class="key">D</div>
+      <div class="key">F</div>
+      <div class="key">G</div>
+      <div class="key">H</div>
+      <div class="key">J</div>
+      <div class="key">K</div>
+      <div class="key">L</div>
+      <div class="key-hint"><span class="kh-val">PARAM SELECT</span></div>
+    </div>
+
+    <!-- Row 4: Bottom -->
+    <div class="key-row">
+      <div class="key wider" style="border-color:#44ffaa44;color:#44ffaa;">SHIFT</div>
+      <div class="key">Z</div>
+      <div class="key">X</div>
+      <div class="key">C</div>
+      <div class="key">V</div>
+      <div class="key">B</div>
+      <div class="key active-key space-key" style="border-color:#ff444466;color:#ff4444;">SPACE — GO</div>
+      <div class="key-hint"><span class="kh-val">TRANSPORT</span></div>
+    </div>
+  </div>
+
+  <!-- MASTER + TRANSPORT -->
+  <div class="master-area">
+    <!-- Transport -->
+    <div style="display:flex;gap:14px;align-items:center;">
+      <div style="color:#44ffaa;font-size:18px;text-shadow:0 0 8px rgba(68,255,170,0.4);">&#9654;</div>
+      <div style="color:#445566;font-size:18px;">&#9724;</div>
+      <div style="color:#445566;font-size:16px;">&#9198;</div>
+    </div>
+    <div style="font-size:8px;letter-spacing:2px;color:#556677;">TRANSPORT</div>
+
+    <!-- Divider -->
+    <div style="width:80%;height:1px;background:#1a2030;"></div>
+
+    <!-- Master -->
+    <div style="font-size:8px;letter-spacing:3px;color:#556677;">MASTER</div>
+    <div style="font-size:32px;font-weight:bold;color:#e8aa22;text-shadow:0 0 16px rgba(232,170,34,0.4);letter-spacing:3px;">100</div>
+  </div>
+
+</div>
+
+</body>
+</html>

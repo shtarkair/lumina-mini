@@ -19,6 +19,12 @@
       "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
       "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/media-server.js"],
       "port": 3458
+    },
+    {
+      "name": "f35-mockup",
+      "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
+      "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/mockup-server.js"],
+      "port": 3460
     }
   ]
 }
