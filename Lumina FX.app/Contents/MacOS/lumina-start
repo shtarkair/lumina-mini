@@ -1,61 +1,256 @@
 #!/bin/bash
 
-# Lumina FX Launcher
-# Auto-finds Node.js and the project folder, starts the server, opens the browser
+# ============================================================
+# Lumina FX — Self-Installing Launcher
+# ============================================================
+# On first run: installs Node.js, clones repo, runs npm install
+# On subsequent runs: starts the server and opens the browser
+# ============================================================
 
-# Find Node.js (check common locations)
-NODE_BIN=""
-for p in \
-  /usr/local/bin/node \
-  /opt/homebrew/bin/node \
-  "$HOME/.nvm/versions/node"/*/bin/node \
-  "$HOME/.volta/bin/node"; do
-  if [ -x "$p" ]; then
-    NODE_BIN="$p"
-    break
+GITHUB_REPO="https://github.com/shtarkair/lumina-mini.git"
+PORT=3457
+LOG_FILE="/tmp/lumina-fx-install.log"
+FIRST_RUN=false
+
+# ---- macOS Dialog Helpers ----
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"Lumina FX\"" 2>/dev/null
+}
+
+alert_error() {
+  osascript -e "display alert \"Lumina FX\" message \"$1\" as critical" 2>/dev/null
+}
+
+# Show a progress window (non-blocking) — returns immediately
+# Uses a background osascript process
+show_install_progress() {
+  osascript -e "
+    tell application \"System Events\"
+      display dialog \"$1\" with title \"Lumina FX Setup\" buttons {\"Installing...\"} giving up after 600 with icon note
+    end tell
+  " 2>/dev/null &
+  PROGRESS_PID=$!
+}
+
+kill_progress() {
+  [ -n "$PROGRESS_PID" ] && kill "$PROGRESS_PID" 2>/dev/null
+  # Dismiss any open System Events dialogs
+  osascript -e '
+    try
+      tell application "System Events"
+        set theWindows to (windows of process "osascript" whose name contains "Lumina")
+        repeat with w in theWindows
+          click button 1 of w
+        end repeat
+      end tell
+    end try
+  ' 2>/dev/null
+}
+
+# ---- Step 1: Find Node.js ----
+
+find_node() {
+  # Check common locations (most likely first)
+  for p in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    "$HOME/.nvm/versions/node"/*/bin/node \
+    "$HOME/.volta/bin/node" \
+    "$HOME/.nodenv/shims/node"; do
+    if [ -x "$p" ]; then
+      echo "$p"
+      return 0
+    fi
+  done
+
+  # Try loading NVM
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    export NVM_DIR="$HOME/.nvm"
+    source "$NVM_DIR/nvm.sh"
+    NODE_PATH=$(which node 2>/dev/null)
+    if [ -n "$NODE_PATH" ] && [ -x "$NODE_PATH" ]; then
+      echo "$NODE_PATH"
+      return 0
+    fi
   fi
-done
 
-# Also try loading NVM if node not found directly
-if [ -z "$NODE_BIN" ] && [ -s "$HOME/.nvm/nvm.sh" ]; then
-  source "$HOME/.nvm/nvm.sh"
-  NODE_BIN=$(which node 2>/dev/null)
-fi
+  return 1
+}
+
+NODE_BIN=$(find_node)
+
+# ---- Step 2: Install Node.js if needed ----
 
 if [ -z "$NODE_BIN" ]; then
-  osascript -e 'display alert "Lumina FX" message "Node.js not found. Please install Node.js first." as critical'
+  FIRST_RUN=true
+  echo "$(date): Starting first-run setup" > "$LOG_FILE"
+
+  show_install_progress "Installing Node.js... This may take a minute."
+
+  # Install NVM
+  echo "Installing NVM..." >> "$LOG_FILE"
+  export NVM_DIR="$HOME/.nvm"
+  mkdir -p "$NVM_DIR"
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh 2>>"$LOG_FILE" | bash >>"$LOG_FILE" 2>&1
+
+  # Load NVM
+  [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+
+  # Install Node.js LTS
+  echo "Installing Node.js LTS..." >> "$LOG_FILE"
+  nvm install --lts >>"$LOG_FILE" 2>&1
+
+  NODE_BIN=$(which node 2>/dev/null)
+
+  if [ -z "$NODE_BIN" ]; then
+    kill_progress
+    alert_error "Failed to install Node.js.\n\nCheck log: $LOG_FILE"
+    exit 1
+  fi
+
+  echo "Node.js installed: $NODE_BIN ($(\"$NODE_BIN\" --version))" >> "$LOG_FILE"
+  kill_progress
+  notify "Node.js installed successfully"
+fi
+
+# Ensure NVM is loaded (for npm path)
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  source "$NVM_DIR/nvm.sh" 2>/dev/null
+fi
+
+# Find npm (same directory as node)
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+if [ ! -x "$NPM_BIN" ]; then
+  NPM_BIN=$(which npm 2>/dev/null)
+fi
+
+# ---- Step 3: Check for Git ----
+
+if ! command -v git &>/dev/null; then
+  FIRST_RUN=true
+  # On macOS, this will trigger the Xcode Command Line Tools install dialog
+  alert_error "Git is not installed.\n\nmacOS will now prompt you to install Command Line Tools.\n\nAfter installation completes, double-click Lumina FX again."
+  xcode-select --install 2>/dev/null
   exit 1
 fi
 
-# Find lighting-server.js
-SERVER_PATH=$(find /Users -name "lighting-server.js" -not -path "*/node_modules/*" -not -path "*/.app/*" -maxdepth 6 2>/dev/null | head -1)
+# ---- Step 4: Find or clone the project ----
 
-if [ -z "$SERVER_PATH" ]; then
-  osascript -e 'display alert "Lumina FX" message "Could not find lighting-server.js on this machine." as critical'
-  exit 1
+find_project() {
+  # Priority 1: Same directory as the .app bundle
+  APP_DIR="$(cd "$(dirname "$0")/../../../" && pwd)"
+  if [ -f "$APP_DIR/lighting-server.js" ]; then
+    echo "$APP_DIR"
+    return 0
+  fi
+
+  # Priority 2: ~/Lumina FX/
+  if [ -f "$HOME/Lumina FX/lighting-server.js" ]; then
+    echo "$HOME/Lumina FX"
+    return 0
+  fi
+
+  # Priority 3: Search common locations (fast, shallow)
+  for search_dir in "$HOME/Documents" "$HOME/Desktop" "$HOME"; do
+    FOUND=$(find "$search_dir" -maxdepth 4 -name "lighting-server.js" \
+      -not -path "*/node_modules/*" \
+      -not -path "*/.Trash/*" \
+      -not -path "*/.app/*" \
+      2>/dev/null | head -1)
+    if [ -n "$FOUND" ]; then
+      echo "$(dirname "$FOUND")"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+PROJECT_DIR=$(find_project)
+
+if [ -z "$PROJECT_DIR" ]; then
+  FIRST_RUN=true
+  [ ! -f "$LOG_FILE" ] && echo "$(date): Setup" > "$LOG_FILE"
+
+  show_install_progress "Downloading Lumina FX from GitHub..."
+
+  LUMINA_DIR="$HOME/Lumina FX"
+  echo "Cloning $GITHUB_REPO to $LUMINA_DIR ..." >> "$LOG_FILE"
+  git clone "$GITHUB_REPO" "$LUMINA_DIR" >>"$LOG_FILE" 2>&1
+
+  if [ ! -f "$LUMINA_DIR/lighting-server.js" ]; then
+    kill_progress
+    alert_error "Failed to download Lumina FX.\n\nPlease check your internet connection and try again.\n\nLog: $LOG_FILE"
+    exit 1
+  fi
+
+  PROJECT_DIR="$LUMINA_DIR"
+  echo "Project cloned to $PROJECT_DIR" >> "$LOG_FILE"
+  kill_progress
+  notify "Lumina FX downloaded"
 fi
 
-PROJECT_DIR=$(dirname "$SERVER_PATH")
+# ---- Step 5: npm install if needed ----
+
+if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+  FIRST_RUN=true
+  [ ! -f "$LOG_FILE" ] && echo "$(date): Setup" > "$LOG_FILE"
+
+  show_install_progress "Installing dependencies..."
+
+  echo "Running npm install in $PROJECT_DIR ..." >> "$LOG_FILE"
+  cd "$PROJECT_DIR"
+  "$NPM_BIN" install >>"$LOG_FILE" 2>&1
+
+  if [ $? -ne 0 ]; then
+    kill_progress
+    alert_error "Failed to install dependencies.\n\nLog: $LOG_FILE"
+    exit 1
+  fi
+
+  kill_progress
+  notify "Dependencies installed"
+fi
+
+# ---- Step 6: Create media directories if missing ----
+
+mkdir -p "$PROJECT_DIR/media/movies" 2>/dev/null
+mkdir -p "$PROJECT_DIR/media/pics" 2>/dev/null
+
+# ---- Step 7: Start the server ----
 
 # Kill any existing Lumina server
 pkill -f "node.*lighting-server.js" 2>/dev/null
 sleep 0.5
 
-# Start the server in background
 cd "$PROJECT_DIR"
 "$NODE_BIN" lighting-server.js &
 SERVER_PID=$!
 
-# Wait for server to be ready (up to 6 seconds)
-for i in {1..20}; do
-  if curl -s http://localhost:3457 > /dev/null 2>&1; then
+# Wait for server to be ready (up to 8 seconds)
+READY=false
+for i in {1..25}; do
+  if curl -s "http://localhost:$PORT" > /dev/null 2>&1; then
+    READY=true
     break
   fi
   sleep 0.3
 done
 
-# Open in default browser
-open "http://localhost:3457"
+if [ "$READY" = false ]; then
+  alert_error "Server failed to start.\n\nCheck if port $PORT is already in use."
+  kill $SERVER_PID 2>/dev/null
+  exit 1
+fi
+
+# Open in browser
+open "http://localhost:$PORT"
+
+if [ "$FIRST_RUN" = true ]; then
+  notify "Lumina FX is ready!"
+fi
 
 # Keep running so the server stays alive
 wait $SERVER_PID

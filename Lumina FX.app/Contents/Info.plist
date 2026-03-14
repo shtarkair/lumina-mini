@@ -6,13 +6,25 @@
   <string>lumina-start</string>
   <key>CFBundleName</key>
   <string>Lumina FX</string>
+  <key>CFBundleDisplayName</key>
+  <string>Lumina FX</string>
   <key>CFBundleIdentifier</key>
   <string>com.lumina.fx</string>
   <key>CFBundleVersion</key>
-  <string>1.0</string>
+  <string>0.5.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.5.0</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>Lumina</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
   <key>LSUIElement</key>
   <false/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
 </dict>
 </plist>
