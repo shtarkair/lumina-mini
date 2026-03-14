@@ -88,16 +88,18 @@ const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
 const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc", ROBE_MP:"#ff8800", ROBE_MP2:"#ff6600", MAC_VIPER:"#22ccaa", MAC_VIPER2:"#11aa88" };
+const FIXTURE_POSITIONS = ["FRONT 1","FRONT 2","TOP","TOP BACK","BACK","FLOOR","SIDE","CUSTOM"];
+const POSITION_COLORS = {"FRONT 1":"#ff8844","FRONT 2":"#ffaa44","TOP":"#44aaff","TOP BACK":"#4466ff","BACK":"#aa44ff","FLOOR":"#44ffaa","SIDE":"#ffdd44","CUSTOM":"#888888"};
 function defaultFixtures() {
   return [
-    { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT"   },
-    { id:2, name:"Spot 2",    color:"#ff5544", type:"SPOT"   },
-    { id:3, name:"Wash 1",    color:"#44aaff", type:"WASH"   },
-    { id:4, name:"Wash 2",    color:"#44aaff", type:"WASH"   },
-    { id:5, name:"Strobe 1",  color:"#ffdd44", type:"STROBE" },
-    { id:6, name:"LED Bar 1", color:"#aa44ff", type:"LED"    },
-    { id:7, name:"LED Bar 2", color:"#aa44ff", type:"LED"    },
-    { id:8, name:"Fog",       color:"#44ffaa", type:"FX"     },
+    { id:1, name:"Spot 1",    color:"#ff5544", type:"SPOT",   position:"FRONT 1" },
+    { id:2, name:"Spot 2",    color:"#ff5544", type:"SPOT",   position:"FRONT 1" },
+    { id:3, name:"Wash 1",    color:"#44aaff", type:"WASH",   position:"TOP"     },
+    { id:4, name:"Wash 2",    color:"#44aaff", type:"WASH",   position:"TOP"     },
+    { id:5, name:"Strobe 1",  color:"#ffdd44", type:"STROBE", position:"FRONT 2" },
+    { id:6, name:"LED Bar 1", color:"#aa44ff", type:"LED",    position:"BACK"    },
+    { id:7, name:"LED Bar 2", color:"#aa44ff", type:"LED",    position:"BACK"    },
+    { id:8, name:"Fog",       color:"#44ffaa", type:"FX",     position:"FLOOR"   },
   ];
 }
 
@@ -116,6 +118,11 @@ const DMX_PROFILES = {
 };
 // Built-in profile names (cannot be overwritten by custom)
 const BUILTIN_PROFILES = new Set(Object.keys(DMX_PROFILES));
+// SPOT kept as fallback type (fixtures revert to SPOT when their type is removed)
+const CORE_PROFILES = new Set();
+// Load hidden profiles from localStorage
+let _hiddenProfiles = new Set();
+try { _hiddenProfiles = new Set(JSON.parse(localStorage.getItem("lumina-hidden-profiles") || "[]")); } catch(e) {}
 // Load custom profiles from localStorage
 try {
   const custom = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}");
@@ -124,6 +131,9 @@ try {
     TYPE_COLORS[name] = prof.color || "#888888";
   });
 } catch(e) {}
+// Load user folders from localStorage
+let _userFolders = {};
+try { _userFolders = JSON.parse(localStorage.getItem("lumina-user-folders") || "{}"); } catch(e) {}
 
 function generateDefaultPatch(fixtures) {
   const patch = {};
@@ -515,6 +525,8 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
           {Object.keys(DMX_PROFILES).map(t=>{const ids=fixtures.filter(f=>f.type===t).map(f=>f.id);if(ids.length===0)return null;const allSel=ids.every(id=>selFixtures.has(id));return <button key={t} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 6px",fontSize:8,background:allSel?"#e8aa2218":"#0c0e12",border:`1px solid ${allSel?"#e8aa22":"#252930"}`,color:allSel?"#e8aa22":"#555",borderRadius:2,cursor:"pointer"}}>{t}</button>;})}
           <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
           {[...new Set(fixtures.map(f=>f.color))].map(col=>{const ids=fixtures.filter(f=>f.color===col).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={col} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 4px",fontSize:8,background:allSel?col+"33":"#0c0e12",border:`1px solid ${allSel?col:"#252930"}`,borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}><div style={{width:8,height:8,borderRadius:"50%",background:col}}/></button>;})}
+          <span style={{width:1,background:"#252930",margin:"0 2px"}}/>
+          {[...new Set(fixtures.map(f=>f.position||"FRONT 1"))].map(pos=>{const posCol=POSITION_COLORS[pos]||"#888";const ids=fixtures.filter(f=>(f.position||"FRONT 1")===pos).map(f=>f.id);const allSel=ids.every(id=>selFixtures.has(id));return <button key={pos} onClick={()=>setSelFixtures(prev=>{const s=new Set(prev);if(allSel)ids.forEach(id=>s.delete(id));else ids.forEach(id=>s.add(id));return s;})} style={{padding:"1px 6px",fontSize:7,background:allSel?posCol+"22":"#0c0e12",border:`1px solid ${allSel?posCol:posCol+"44"}`,color:allSel?posCol:posCol+"88",borderRadius:2,cursor:"pointer",letterSpacing:0.5}}>{pos}</button>;})}
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
           {fixtures.map(fx => {
@@ -1259,6 +1271,7 @@ function LightingTimeline() {
   const [builderParams, setBuilderParams] = useState([]);
   const [builderEditName, setBuilderEditName] = useState(null); // non-null = editing existing
   const [customProfilesVer, setCustomProfilesVer] = useState(0); // force re-render on save
+  const [hiddenProfiles, setHiddenProfiles] = useState(_hiddenProfiles);
   // Fixture Library browser
   const [fixtureLibraryOpen, setFixtureLibraryOpen] = useState(false);
   const [fixtureLibraryData, setFixtureLibraryData] = useState(null); // {manufacturers, fixtures}
@@ -1268,6 +1281,15 @@ function LightingTimeline() {
   const [libSelectedMode, setLibSelectedMode] = useState(0);
   const [libAddCount, setLibAddCount] = useState(1);
   const [libQtyKeypad, setLibQtyKeypad] = useState(null); // {value, dirty, rect}
+  // User Folders in Library
+  const [userFolders, setUserFolders] = useState(_userFolders);
+  const [libViewMode, setLibViewMode] = useState("library"); // "library" or "folders"
+  const [libSelectedFolder, setLibSelectedFolder] = useState(null); // folder id
+  const [libFolderKeyboard, setLibFolderKeyboard] = useState(null); // {folderId, value, isNew}
+  const [libFolderProfilePicker, setLibFolderProfilePicker] = useState(false); // show add-profile popup
+  const [libFolderSavePicker, setLibFolderSavePicker] = useState(null); // {profileName} — save-to-folder popup in OFL view
+  const [libFolderSelectedProfile, setLibFolderSelectedProfile] = useState(null); // selected profile name in folder view
+  const saveUserFolders = (folders) => { setUserFolders(folders); localStorage.setItem("lumina-user-folders", JSON.stringify(folders)); };
   useEffect(() => { localStorage.setItem("lumina-fixtures", JSON.stringify(fixtures)); }, [fixtures]);
   const [cues,setCuesRaw] = useState(defaultCues);
   const undoHistoryRef = useRef([]);
@@ -1402,77 +1424,129 @@ function LightingTimeline() {
   const [dmxMonitorOpen, setDmxMonitorOpen] = useState(false);
   const dmxMonitorOpenRef = useRef(false);
   const [monitorUniverse, setMonitorUniverse] = useState(1);
+  const [monitorShowAll, setMonitorShowAll] = useState(false);
   const monitorDataRef = useRef({});
   const [monitorTick, setMonitorTick] = useState(0);
   const [nicList, setNicList] = useState([]);
   const [nicConfig, setNicConfig] = useState({ inputIP: '0.0.0.0', outputIP: '0.0.0.0' });
   const [keypadState, setKeypadState] = useState(null); // { fxId, paramId, field:'universe'|'channel', value:'', rect:{top,left} }
+  const [routingModalOpen, setRoutingModalOpen] = useState(false);
+  const [universeRouting, setUniverseRouting] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("lumina-universe-routing") || "{}"); } catch(e) { return {}; }
+  });
+  const universeRoutingRef = useRef(universeRouting);
+  const usedUniverses = useMemo(() => {
+    const unis = new Set();
+    Object.values(dmxPatch).forEach(fp => { if (fp.universe) unis.add(fp.universe); });
+    return [...unis].sort((a, b) => a - b);
+  }, [dmxPatch]);
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
+  useEffect(() => {
+    universeRoutingRef.current = universeRouting;
+    localStorage.setItem("lumina-universe-routing", JSON.stringify(universeRouting));
+    if (outputWsRef.current?.readyState === WebSocket.OPEN) {
+      outputWsRef.current.send(JSON.stringify({ type: 'universe_routing', routing: universeRouting }));
+    }
+  }, [universeRouting]);
 
   // ─── Show-level save / load ───
   const [showName, setShowName] = useState("my-show");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveDialogName, setSaveDialogName] = useState("");
   const showFileInputRef = useRef(null);
-  const doSaveShow = (name) => {
+  const [loadDialogOpen, setLoadDialogOpen] = useState(false);
+  const [loadDialogShows, setLoadDialogShows] = useState([]);
+  const [loadDialogDir, setLoadDialogDir] = useState('');
+
+  const doSaveShow = async (name) => {
     setShowName(name);
     let midiMapData = {};
     try { midiMapData = JSON.parse(localStorage.getItem("lumina-midi-map") || "{}"); } catch(e) {}
     let customProfilesData = {};
     try { customProfilesData = JSON.parse(localStorage.getItem("lumina-custom-profiles") || "{}"); } catch(e) {}
     const data = {
-      type: "lumina-project", version: 3, showName: name, savedAt: new Date().toISOString(),
+      type: "lumina-project", version: 4, showName: name, savedAt: new Date().toISOString(),
       fixtures, cues, dmxPatch, sequenceStorage, mutedLanes: [...mutedLanes],
       bpm, loopStart, loopEnd, loopEnabled, outputConfig, nicConfig,
+      universeRouting,
+      hiddenProfiles: [...hiddenProfiles],
       midiMap: midiMapData, customProfiles: customProfilesData,
+      userFolders,
     };
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name.replace(/[^a-zA-Z0-9_\-]/g, "_") + ".lumina";
-    a.click();
-    URL.revokeObjectURL(url);
-    setSaveDialogOpen(false);
+    try {
+      const resp = await fetch('/api/save-show', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      const result = await resp.json();
+      if (result.ok) {
+        setSaveDialogOpen(false);
+      } else {
+        alert("Save failed: " + (result.error || "Unknown error"));
+      }
+    } catch(e) {
+      alert("Save failed: " + e.message);
+    }
   };
   const handleShowSave = () => { setSaveDialogName(showName); setSaveDialogOpen(true); };
-  const handleShowLoad = (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
-        if(data.fixtures) setFixtures(data.fixtures);
-        if(data.dmxPatch) setDmxPatch(data.dmxPatch);
-        else if(data.fixtures) setDmxPatch(generateDefaultPatch(data.fixtures));
-        if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
-        if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
-        if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
-        if(data.showName) setShowName(data.showName);
-        if(data.bpm !== undefined) setBpm(data.bpm);
-        if(data.loopStart !== undefined) setLoopStart(data.loopStart);
-        if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
-        if(data.loopEnabled !== undefined) setLoopEnabled(data.loopEnabled);
-        if(data.outputConfig) setOutputConfig(prev => ({...prev, ...data.outputConfig, enabled: false}));
-        if(data.nicConfig) setNicConfig(data.nicConfig);
-        if(data.customProfiles && typeof data.customProfiles === "object") {
-          Object.entries(data.customProfiles).forEach(([name, prof]) => {
-            DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
-            TYPE_COLORS[name] = prof.color || "#888888";
-          });
-          localStorage.setItem("lumina-custom-profiles", JSON.stringify(data.customProfiles));
-          setCustomProfilesVer(v => v + 1);
-        }
-        if(data.midiMap && typeof data.midiMap === "object") {
-          localStorage.setItem("lumina-midi-map", JSON.stringify(data.midiMap));
-        }
-      } catch(err) { alert("Failed to load show: " + err.message); }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+
+  const applyShowData = (data) => {
+    if(data.type !== "lumina-project") { alert("Not a valid LUMINA project file"); return; }
+    if(data.fixtures) setFixtures(data.fixtures);
+    if(data.dmxPatch) setDmxPatch(data.dmxPatch);
+    else if(data.fixtures) setDmxPatch(generateDefaultPatch(data.fixtures));
+    if(data.cues) setCues(data.cues.map(c => ({...c, id: genId(), batchId: null})));
+    if(data.sequenceStorage) setSequenceStorage(data.sequenceStorage);
+    if(data.mutedLanes) setMutedLanes(new Set(data.mutedLanes));
+    if(data.showName) setShowName(data.showName);
+    if(data.bpm !== undefined) setBpm(data.bpm);
+    if(data.loopStart !== undefined) setLoopStart(data.loopStart);
+    if(data.loopEnd !== undefined) setLoopEnd(data.loopEnd);
+    if(data.loopEnabled !== undefined) setLoopEnabled(data.loopEnabled);
+    if(data.outputConfig) setOutputConfig(prev => ({...prev, ...data.outputConfig, enabled: false}));
+    if(data.nicConfig) setNicConfig(data.nicConfig);
+    if(data.universeRouting) setUniverseRouting(data.universeRouting);
+    if(data.hiddenProfiles && Array.isArray(data.hiddenProfiles)) {
+      const hp = new Set(data.hiddenProfiles);
+      setHiddenProfiles(hp);
+      localStorage.setItem("lumina-hidden-profiles", JSON.stringify([...hp]));
+    }
+    if(data.customProfiles && typeof data.customProfiles === "object") {
+      Object.entries(data.customProfiles).forEach(([name, prof]) => {
+        DMX_PROFILES[name] = { channels: prof.channels, map: prof.map };
+        TYPE_COLORS[name] = prof.color || "#888888";
+      });
+      localStorage.setItem("lumina-custom-profiles", JSON.stringify(data.customProfiles));
+      setCustomProfilesVer(v => v + 1);
+    }
+    if(data.userFolders && typeof data.userFolders === "object") {
+      setUserFolders(data.userFolders);
+      localStorage.setItem("lumina-user-folders", JSON.stringify(data.userFolders));
+    }
+    if(data.midiMap && typeof data.midiMap === "object") {
+      localStorage.setItem("lumina-midi-map", JSON.stringify(data.midiMap));
+    }
+  };
+
+  const handleShowLoad = async () => {
+    try {
+      const resp = await fetch('/api/list-shows');
+      const result = await resp.json();
+      setLoadDialogShows(result.shows || []);
+      setLoadDialogDir(result.dir || '');
+      setLoadDialogOpen(true);
+    } catch(e) {
+      alert("Cannot list shows: " + e.message);
+    }
+  };
+
+  const loadShowFromServer = async (folder, filename) => {
+    try {
+      const loadPath = folder ? folder + '/' + filename : filename;
+      const resp = await fetch('/api/load-show/' + encodeURIComponent(loadPath));
+      const data = await resp.json();
+      applyShowData(data);
+      setLoadDialogOpen(false);
+    } catch(e) {
+      alert("Load failed: " + e.message);
+    }
   };
 
   const shiftTimerRef = useRef(null);
@@ -1582,6 +1656,7 @@ function LightingTimeline() {
           ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate }));
           ws.send(JSON.stringify({ type:"input_config", enabled:outputConfig.inputEnabled, sourceIP:outputConfig.inputSourceIP||null, forwardToClient:outputConfig.inputMonitor }));
           ws.send(JSON.stringify({ type:"output_control", enabled:outputConfig.enabled }));
+          ws.send(JSON.stringify({ type:"universe_routing", routing:universeRoutingRef.current }));
           if (dmxMonitorOpenRef.current) ws.send(JSON.stringify({ type:"monitor", enabled:true }));
         };
         ws.onmessage = (event) => {
@@ -1913,8 +1988,7 @@ function LightingTimeline() {
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
         <div style={{width:1,height:22,background:"#3a3020"}}/>
         <button onClick={handleShowSave} style={{background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Save entire show">{"\uD83D\uDCBE"} SAVE SHOW</button>
-        <button onClick={()=>showFileInputRef.current.click()} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Load show file">{"\uD83D\uDCC2"} LOAD SHOW</button>
-        <input ref={showFileInputRef} type="file" accept=".lumina,.json" onChange={handleShowLoad} style={{display:"none"}}/>
+        <button onClick={handleShowLoad} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Load show file">{"\uD83D\uDCC2"} LOAD SHOW</button>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
           <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#cc9944"}}/>
@@ -2158,6 +2232,8 @@ function LightingTimeline() {
                   </label>
                 </div>
 
+                <button onClick={()=>setRoutingModalOpen(true)} style={{padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0c0e12",border:"2px solid #aa66dd44",color:"#aa66dd",borderRadius:4,cursor:"pointer",marginTop:4}}>{"\u21C4"} UNIVERSE ROUTING</button>
+
                 <div style={{fontSize:8,color:"#4488ff66",letterSpacing:2,marginTop:4}}>ARTNET INPUT</div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <button onClick={()=>setOutputConfig(c=>({...c,inputEnabled:!c.inputEnabled}))} style={{flex:1,padding:"6px 0",fontSize:10,fontWeight:"bold",letterSpacing:1,background:outputConfig.inputEnabled?"#0a1a2a":"#0c0e12",border:"2px solid "+(outputConfig.inputEnabled?"#4488ff":"#252930"),color:outputConfig.inputEnabled?"#4488ff":"#555",borderRadius:4,cursor:"pointer"}}>{outputConfig.inputEnabled?"INPUT ON":"INPUT OFF"}</button>
@@ -2228,14 +2304,82 @@ function LightingTimeline() {
         </div>
       </div>
 
+      {/* Universe Routing Modal */}
+      {routingModalOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setRoutingModalOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #aa66dd44",borderRadius:8,width:660,maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 40px rgba(0,0,0,0.8)"}}>
+            <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#aa66dd",letterSpacing:2}}>UNIVERSE ROUTING</span>
+              <span style={{fontSize:9,color:"#555",marginLeft:8}}>{usedUniverses.length} universes</span>
+              <div style={{flex:1}}/>
+              <button onClick={()=>{setUniverseRouting({});}} style={{padding:"3px 10px",fontSize:9,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",marginRight:8}}>CLEAR ALL</button>
+              <button onClick={()=>setRoutingModalOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>{"\u2715"}</button>
+            </div>
+            <div style={{padding:"6px 16px",borderBottom:"1px solid #1e222a",display:"grid",gridTemplateColumns:"50px 1fr 90px 90px",gap:8,alignItems:"center"}}>
+              <span style={{fontSize:8,color:"#555",letterSpacing:1}}>UNI</span>
+              <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>ARTNET IP</span>
+              <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>ART UNI</span>
+              <span style={{fontSize:8,color:"#4488ff88",letterSpacing:1}}>sACN UNI</span>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"0 16px"}}>
+              {usedUniverses.length === 0 ? (
+                <div style={{padding:20,textAlign:"center",color:"#444",fontSize:10}}>No universes patched. Add fixtures and patch them first.</div>
+              ) : usedUniverses.map(uni => {
+                const route = universeRouting[String(uni)] || {};
+                const artIp = route.artnet?.ip || '';
+                const artUni = route.artnet?.universe ?? (uni - 1);
+                const sacnUni = route.sacn?.universe ?? uni;
+                const hasCustomIp = !!route.artnet?.ip;
+                const hasCustomArt = route.artnet?.universe !== undefined;
+                const hasCustomSacn = route.sacn?.universe !== undefined;
+                return (
+                  <div key={uni} style={{display:"grid",gridTemplateColumns:"50px 1fr 90px 90px",gap:8,alignItems:"center",padding:"6px 0",borderBottom:"1px solid #0e1018"}}>
+                    <span style={{fontSize:12,fontWeight:"bold",color:"#aa66dd",fontFamily:"monospace"}}>{uni}</span>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'route_artnet_ip',routeUniverse:uni,value:artIp,dirty:false,rect:{top:r.bottom+2,left:r.left}});}} style={{background:"#080a0e",border:"1px solid "+(hasCustomIp?"#ff884466":"#1a1e28"),color:hasCustomIp?"#ff8844":"#555",borderRadius:3,padding:"5px 8px",fontSize:10,cursor:"pointer",userSelect:"none",fontFamily:"monospace",minHeight:22}}>{hasCustomIp ? artIp : 'default'}</div>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'route_artnet_uni',routeUniverse:uni,value:String(artUni),dirty:false,rect:{top:r.bottom+2,left:r.left}});}} style={{background:"#080a0e",border:"1px solid "+(hasCustomArt?"#ff884466":"#1a1e28"),color:hasCustomArt?"#ff8844":"#666",borderRadius:3,padding:"5px 8px",fontSize:11,cursor:"pointer",userSelect:"none",fontFamily:"monospace",textAlign:"center",minHeight:22}}>{artUni}</div>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'route_sacn_uni',routeUniverse:uni,value:String(sacnUni),dirty:false,rect:{top:r.bottom+2,left:r.left}});}} style={{background:"#080a0e",border:"1px solid "+(hasCustomSacn?"#4488ff44":"#1a1e28"),color:hasCustomSacn?"#4488ff":"#666",borderRadius:3,padding:"5px 8px",fontSize:11,cursor:"pointer",userSelect:"none",fontFamily:"monospace",textAlign:"center",minHeight:22}}>{sacnUni}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",fontSize:8,color:"#444"}}>
+              Defaults: ArtNet IP from global Host ({outputConfig.artnetHost}), ArtNet Universe = Lumina-1, sACN Universe = Lumina number. Click any cell to override.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* IP Keypad Popup */}
-      {keypadState && (keypadState.field==='ip_host'||keypadState.field==='ip_source') && (() => {
+      {keypadState && (keypadState.field==='ip_host'||keypadState.field==='ip_source'||keypadState.field==='route_artnet_ip') && (() => {
         const isHost = keypadState.field === 'ip_host';
-        const color = isHost ? '#ff8844' : '#4488ff';
-        const label = isHost ? 'HOST IP' : 'SOURCE IP';
+        const isRouteIp = keypadState.field === 'route_artnet_ip';
+        const color = (isHost || isRouteIp) ? '#ff8844' : '#4488ff';
+        const label = isRouteIp ? 'ARTNET IP \u2022 U'+keypadState.routeUniverse : (isHost ? 'HOST IP' : 'SOURCE IP');
+        const isValidIpAddr = (s) => {
+          if (!s) return false;
+          const parts = s.split('.');
+          if (parts.length !== 4) return false;
+          return parts.every(p => { const n = parseInt(p); return !isNaN(n) && n >= 0 && n <= 255 && String(n) === p; });
+        };
         const applyIp = (val) => {
-          const ip = val || (isHost ? '127.0.0.1' : '');
-          setOutputConfig(c => isHost ? {...c, artnetHost: ip} : {...c, inputSourceIP: ip});
+          if (isRouteIp) {
+            const uni = String(keypadState.routeUniverse);
+            const ip = (val && isValidIpAddr(val)) ? val : '';
+            setUniverseRouting(prev => {
+              const entry = {...(prev[uni] || {})};
+              if (ip) {
+                entry.artnet = {...(entry.artnet || {}), ip};
+              } else {
+                // Invalid or empty IP → clear back to default
+                if (entry.artnet) { delete entry.artnet.ip; if (Object.keys(entry.artnet).length === 0) delete entry.artnet; }
+                if (!entry.artnet && !entry.sacn) { const n = {...prev}; delete n[uni]; return n; }
+              }
+              return {...prev, [uni]: entry};
+            });
+          } else {
+            const ip = val || (isHost ? '127.0.0.1' : '');
+            setOutputConfig(c => isHost ? {...c, artnetHost: ip} : {...c, inputSourceIP: ip});
+          }
           setKeypadState(null);
         };
         const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
@@ -2244,22 +2388,173 @@ function LightingTimeline() {
         const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
         return (
           <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
-            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-260),left:Math.min(keypadState.rect.left, window.innerWidth-170),width:160,background:"#141820",border:"1px solid "+color+"66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-320),left:Math.min(keypadState.rect.left, window.innerWidth-222),width:210,background:"#141820",border:"1px solid "+color+"66",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
-                <span style={{fontSize:8,color:color+"88",letterSpacing:1}}>{label}</span>
+                <span style={{fontSize:9,color:color+"88",letterSpacing:1}}>{label}</span>
               </div>
-              <div style={{background:"#080a0e",border:"1px solid "+color+"44",borderRadius:3,padding:"6px 8px",fontSize:14,color:keypadState.dirty?color:color+"66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:1}}>{keypadState.value || (isHost?'0.0.0.0':'any')}</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+              <div style={{background:"#080a0e",border:"1px solid "+color+"44",borderRadius:4,padding:"6px 10px",fontSize:16,color:keypadState.dirty?color:color+"66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:1}}>{keypadState.value || (isHost?'0.0.0.0':'any')}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
                 {[1,2,3,4,5,6,7,8,9].map(d => (
-                  <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                  <button key={d} onClick={()=>kpPress(String(d))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
                 ))}
-                <button onClick={kpDot} style={{padding:"8px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid "+color+"44",color:color,borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>.</button>
-                <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
-                <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+                <button onClick={kpDot} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid "+color+"44",color:color,borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>.</button>
+                <button onClick={()=>kpPress('0')} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                <button onClick={kpBack} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
-                <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
-                <button onClick={()=>{if(keypadState.dirty){applyIp(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                <button onClick={kpClear} style={{minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                <button onClick={()=>{if(keypadState.dirty){applyIp(keypadState.value);}else{setKeypadState(null);}}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Route Universe Keypad Popup (numeric only, no dot) */}
+      {keypadState && (keypadState.field==='route_artnet_uni'||keypadState.field==='route_sacn_uni') && (() => {
+        const isArtnet = keypadState.field === 'route_artnet_uni';
+        const color = isArtnet ? '#ff8844' : '#4488ff';
+        const label = isArtnet ? 'ARTNET UNI \u2022 U'+keypadState.routeUniverse : 'sACN UNI \u2022 U'+keypadState.routeUniverse;
+        const maxVal = isArtnet ? 32767 : 63999;
+        const defaultVal = isArtnet ? (keypadState.routeUniverse - 1) : keypadState.routeUniverse;
+        const applyVal = (val, resetToDefault) => {
+          const uni = String(keypadState.routeUniverse);
+          if (resetToDefault || val.trim() === '') {
+            // DEF button or empty input → clear custom value (back to default)
+            setUniverseRouting(prev => {
+              const entry = {...(prev[uni] || {})};
+              if (isArtnet && entry.artnet) { delete entry.artnet.universe; if (Object.keys(entry.artnet).length === 0) delete entry.artnet; }
+              if (!isArtnet && entry.sacn) { delete entry.sacn.universe; if (Object.keys(entry.sacn).length === 0) delete entry.sacn; }
+              if (!entry.artnet && !entry.sacn) { const n = {...prev}; delete n[uni]; return n; }
+              return {...prev, [uni]: entry};
+            });
+          } else {
+            // Explicit value entered — always save (even if it matches default)
+            const num = Math.max(0, Math.min(maxVal, parseInt(val) || 0));
+            setUniverseRouting(prev => {
+              const entry = {...(prev[uni] || {})};
+              if (isArtnet) { entry.artnet = {...(entry.artnet || {}), universe: num}; }
+              else { entry.sacn = {...(entry.sacn || {}), universe: num}; }
+              return {...prev, [uni]: entry};
+            });
+          }
+          setKeypadState(null);
+        };
+        const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+        const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
+        const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
+        return (
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-320),left:Math.min(keypadState.rect.left, window.innerWidth-222),width:210,background:"#141820",border:"1px solid "+color+"66",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                <span style={{fontSize:9,color:color+"88",letterSpacing:1}}>{label}</span>
+              </div>
+              <div style={{background:"#080a0e",border:"1px solid "+color+"44",borderRadius:4,padding:"6px 10px",fontSize:16,color:keypadState.dirty?color:color+"66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                {[1,2,3,4,5,6,7,8,9].map(d => (
+                  <button key={d} onClick={()=>kpPress(String(d))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                ))}
+                <button onClick={()=>applyVal(String(defaultVal), true)} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:9,fontWeight:"bold",background:"#1a1e28",border:"1px solid "+color+"33",color:color+"88",borderRadius:4,cursor:"pointer",letterSpacing:0.5}}>DEF</button>
+                <button onClick={()=>kpPress('0')} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                <button onClick={kpBack} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                <button onClick={kpClear} style={{minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                <button onClick={()=>{if(keypadState.dirty){applyVal(keypadState.value);}else{setKeypadState(null);}}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {keypadState && keypadState.field==='fixture_count' && (() => {
+        const color = '#44aaff';
+        const label = 'FIXTURE COUNT';
+        const applyCount = (val) => {
+          const n = Math.max(1, Math.min(64, parseInt(val) || 1));
+          setFixtures(prev => {
+            if (n === prev.length) return prev;
+            if (n < prev.length) return prev.slice(0, n);
+            const added = [];
+            const maxId = prev.reduce((m, f) => Math.max(m, f.id), 0);
+            const types = Object.keys(DMX_PROFILES).filter(t => !hiddenProfiles.has(t));
+            if (types.length === 0) types.push('SPOT');
+            for (let i = prev.length; i < n; i++) {
+              const t = types[i % types.length];
+              added.push({id: maxId + 1 + (i - prev.length), name: 'Fixture ' + (maxId + 1 + (i - prev.length)), color: TYPE_COLORS[t] || '#ff5544', type: t, position: 'FRONT 1'});
+            }
+            return [...prev, ...added];
+          });
+          setKeypadState(null);
+        };
+        const kpPress = (d) => setKeypadState(prev => prev.dirty ? ({...prev, value: prev.value + d}) : ({...prev, value: String(d), dirty: true}));
+        const kpClear = () => setKeypadState(prev => ({...prev, value: '', dirty: true}));
+        const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
+        return (
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-320),left:Math.min(keypadState.rect.left, window.innerWidth-222),width:210,background:"#141820",border:"1px solid "+color+"66",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                <span style={{fontSize:9,color:color+"88",letterSpacing:1}}>{label}</span>
+                <span style={{fontSize:8,color:"#555"}}>1-64</span>
+              </div>
+              <div style={{background:"#080a0e",border:"1px solid "+color+"44",borderRadius:4,padding:"6px 10px",fontSize:16,color:keypadState.dirty?color:color+"66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                {[1,2,3,4,5,6,7,8,9].map(d => (
+                  <button key={d} onClick={()=>kpPress(String(d))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                ))}
+                <button onClick={kpClear} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                <button onClick={()=>kpPress('0')} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                <button onClick={kpBack} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
+              </div>
+              <button onClick={()=>{if(keypadState.dirty&&keypadState.value){applyCount(keypadState.value);}else{setKeypadState(null);}}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2,width:"100%"}}>ENTER</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {keypadState && keypadState.field==='fixture_name' && (() => {
+        const color = '#44aaff';
+        const caps = keypadState.caps !== false;
+        const applyName = (val) => {
+          const name = val.trim() || ('Fixture ' + keypadState.fxId);
+          setFixtures(prev => prev.map(f => f.id === keypadState.fxId ? {...f, name} : f));
+          setKeypadState(null);
+        };
+        const kbRows = [
+          ['1','2','3','4','5','6','7','8','9','0'],
+          ['Q','W','E','R','T','Y','U','I','O','P'],
+          ['A','S','D','F','G','H','J','K','L'],
+          ['Z','X','C','V','B','N','M']
+        ];
+        const kbPress = (ch) => setKeypadState(prev => ({...prev, value: prev.value + (prev.caps !== false ? ch : ch.toLowerCase())}));
+        const kbBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
+        const kbClear = () => setKeypadState(prev => ({...prev, value: ''}));
+        const kbSpace = () => setKeypadState(prev => ({...prev, value: prev.value + ' '}));
+        const kbCaps = () => setKeypadState(prev => ({...prev, caps: prev.caps === false ? true : false}));
+        const btnStyle = {minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace",flex:1};
+        return (
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",bottom:10,left:"50%",transform:"translateX(-50%)",width:660,background:"#141820",border:"1px solid "+color+"66",borderRadius:8,boxShadow:"0 -4px 30px rgba(0,0,0,0.9)",padding:"12px 12px 14px",display:"flex",flexDirection:"column",gap:5}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                <span style={{fontSize:9,color:color+"88",letterSpacing:1}}>FIXTURE NAME</span>
+                <div style={{flex:1,background:"#080a0e",border:"1px solid "+color+"44",borderRadius:4,padding:"6px 10px",fontSize:16,color:color,fontFamily:"monospace",minHeight:24,letterSpacing:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{keypadState.value||<span style={{color:color+"44"}}>...</span>}</div>
+              </div>
+              {kbRows.map((row, ri) => (
+                <div key={ri} style={{display:"flex",gap:3,justifyContent:"center"}}>
+                  {ri===3 && <button onClick={kbCaps} style={{...btnStyle,minWidth:50,fontSize:9,background:caps?"#1a2a3a":"#1a1e28",border:"1px solid "+(caps?"#44aaff66":"#252930"),color:caps?"#44aaff":"#666",letterSpacing:1}}>CAPS</button>}
+                  {row.map(ch => (
+                    <button key={ch} onClick={()=>kbPress(ch)} style={btnStyle}>{caps ? ch : ch.toLowerCase()}</button>
+                  ))}
+                  {ri===3 && <button onClick={kbBack} style={{...btnStyle,minWidth:50,fontSize:15,color:"#888"}}>&#9003;</button>}
+                </div>
+              ))}
+              <div style={{display:"flex",gap:3,justifyContent:"center"}}>
+                <button onClick={kbClear} style={{...btnStyle,minWidth:52,fontSize:11,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",letterSpacing:1}}>CLR</button>
+                <button onClick={()=>kbPress('-')} style={btnStyle}>-</button>
+                <button onClick={()=>kbPress('_')} style={btnStyle}>_</button>
+                <button onClick={()=>kbPress('.')} style={btnStyle}>.</button>
+                <button onClick={kbSpace} style={{...btnStyle,flex:4,fontSize:10,color:"#666",letterSpacing:2}}>SPACE</button>
+                <button onClick={()=>applyName(keypadState.value)} style={{...btnStyle,flex:2,fontSize:12,background:"#0a1a0a",border:"1px solid #44ffaa66",color:"#44ffaa",letterSpacing:2}}>ENTER</button>
               </div>
             </div>
           </div>
@@ -2283,6 +2578,34 @@ function LightingTimeline() {
         </div>
       )}
 
+      {/* Load Show Dialog */}
+      {loadDialogOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10002,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setLoadDialogOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #4488ff44",borderRadius:8,width:480,maxHeight:"70vh",boxShadow:"0 8px 40px rgba(0,0,0,0.8)",padding:20,display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#4488ff",letterSpacing:2}}>LOAD SHOW</span>
+              <button onClick={()=>setLoadDialogOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{fontSize:8,color:"#555",letterSpacing:1}}>{loadDialogDir}</div>
+            <div style={{flex:1,overflowY:"auto",maxHeight:"50vh",display:"flex",flexDirection:"column",gap:2}}>
+              {loadDialogShows.length === 0 && <div style={{padding:20,textAlign:"center",fontSize:11,color:"#444"}}>No saved shows found</div>}
+              {loadDialogShows.map((show, idx) => (
+                <div key={(show.folder||'')+'/'+show.filename+idx} onClick={()=>loadShowFromServer(show.folder, show.filename)} style={{padding:"10px 14px",background:"#0a0c12",border:"1px solid #1e222a",borderRadius:4,cursor:"pointer",display:"flex",alignItems:"center",gap:12}} onMouseEnter={e=>e.currentTarget.style.borderColor="#4488ff44"} onMouseLeave={e=>e.currentTarget.style.borderColor="#1e222a"}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:"bold",color:"#4488ff"}}>{show.showName}</div>
+                    <div style={{fontSize:8,color:"#555",marginTop:2}}>{show.folder ? "📁 "+show.folder : show.filename}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:"#666"}}>{(show.size/1024).toFixed(0)} KB</div>
+                    <div style={{fontSize:8,color:"#444"}}>{new Date(show.modified).toLocaleDateString()} {new Date(show.modified).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Fixture Manager Modal */}
       {fixtureManagerOpen && (
         <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:9998,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFixtureManagerOpen(false)}>
@@ -2290,7 +2613,7 @@ function LightingTimeline() {
             <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a"}}>
               <span style={{fontSize:12,fontWeight:"bold",color:"#44aaff",letterSpacing:2}}>FIXTURES</span>
               <span style={{marginLeft:8,fontSize:9,color:"#555"}}>COUNT</span>
-              <input type="number" min={1} max={64} value={fixtures.length} onChange={e=>{const n=Math.max(1,Math.min(64,+e.target.value));setFixtures(prev=>{if(n===prev.length)return prev;if(n<prev.length)return prev.slice(0,n);const added=[];const maxId=prev.reduce((m,f)=>Math.max(m,f.id),0);const types=Object.keys(DMX_PROFILES);for(let i=prev.length;i<n;i++){const t=types[i%types.length];added.push({id:maxId+1+(i-prev.length),name:`Fixture ${maxId+1+(i-prev.length)}`,color:TYPE_COLORS[t]||"#ff5544",type:t});}return[...prev,...added];});}} style={{width:42,marginLeft:4,background:"#080a0e",border:"1px solid #1e222a",color:"#44aaff",borderRadius:3,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
+              <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'fixture_count',value:String(fixtures.length),rect:{top:r.bottom+2,left:r.left}});}} style={{width:42,marginLeft:4,background:"#080a0e",border:"1px solid "+(keypadState?.field==='fixture_count'?"#44aaff":"#1e222a"),color:"#44aaff",borderRadius:3,padding:"2px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fixtures.length}</div>
               <div style={{marginLeft:"auto",display:"flex",gap:8}}>
                 <button onClick={()=>{setFixtures(defaultFixtures());setDmxPatch(generateDefaultPatch(defaultFixtures()));}} style={{padding:"4px 12px",fontSize:9,background:"#0c0e12",border:"1px solid #252930",color:"#777",borderRadius:3,cursor:"pointer",letterSpacing:1}}>RESET</button>
                 <button onClick={()=>setFixtureManagerOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
@@ -2300,6 +2623,7 @@ function LightingTimeline() {
               <span style={{width:28,textAlign:"center"}}>#</span>
               <span style={{flex:1}}>NAME</span>
               <span style={{width:100}}>TYPE</span>
+              <span style={{width:80}}>POSITION</span>
               <span style={{width:70,textAlign:"center"}}>DMX ADDR</span>
               <span style={{width:36,textAlign:"center"}}>COLOR</span>
               <span style={{width:28}}/>
@@ -2310,20 +2634,65 @@ function LightingTimeline() {
                 return (
                 <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderTop:idx>0?"1px solid #1a1d22":"none"}}>
                   <span style={{width:28,textAlign:"center",fontSize:10,color:"#555"}}>{fx.id}</span>
-                  <input type="text" value={fx.name} onChange={e=>{const v=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,name:v}:f));}} style={{flex:1,background:"#080a0e",border:"1px solid #1e222a",color:"#ddd",borderRadius:2,padding:"3px 6px",fontSize:10}}/>
-                  <select value={fx.type} onChange={e=>{const t=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));}} style={{width:100,background:"#080a0e",border:"1px solid #1e222a",color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10}}>
-                    {Object.keys(DMX_PROFILES).map(t=><option key={t} value={t}>{t} ({DMX_PROFILES[t].channels}ch)</option>)}
-                  </select>
-                  {!BUILTIN_PROFILES.has(fx.type) && <button onClick={()=>{const prof=DMX_PROFILES[fx.type];if(!prof)return;setBuilderEditName(fx.type);setBuilderName(fx.type);setBuilderColor(TYPE_COLORS[fx.type]||"#888888");setBuilderParams(Object.entries(prof.map).map(([pid,{offset,bits}])=>({paramId:pid,offset,bits})));setFixtureBuilderOpen(true);}} style={{width:24,height:22,background:"#0a0a1a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:2,cursor:"pointer",fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",padding:0}} title="Edit custom profile">✎</button>}
+                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({field:'fixture_name',fxId:fx.id,value:fx.name,rect:{top:r.bottom+2,left:r.left}});}} style={{flex:1,background:"#080a0e",border:"1px solid "+(keypadState?.field==='fixture_name'&&keypadState?.fxId===fx.id?"#44aaff":"#1e222a"),color:"#ddd",borderRadius:2,padding:"3px 6px",fontSize:10,cursor:"pointer",userSelect:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minHeight:16}}>{fx.name}</div>
+                  <div style={{position:"relative"}}>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='type_dropdown'&&prev.fxId===fx.id?null:{field:'type_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:100,background:"#080a0e",border:"1px solid "+(keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id?"#e8aa22":"#1e222a"),color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10,cursor:"pointer",userSelect:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fx.type} ({(DMX_PROFILES[fx.type]||{channels:"?"}).channels}ch)</div>
+                    {keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id&&(<>
+                      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
+                      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-320),left:keypadState.rect.left,zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:6,padding:4,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:300,overflowY:"auto",width:220,display:"flex",flexDirection:"column",gap:1}}>
+                        {Object.keys(DMX_PROFILES).filter(t=>!hiddenProfiles.has(t)).map(t=>{
+                          const isCore = CORE_PROFILES.has(t);
+                          const isBuiltin = BUILTIN_PROFILES.has(t);
+                          const isCustom = !isBuiltin;
+                          const isSel = fx.type===t;
+                          const selColor = isCustom ? "#ffaa44" : "#e8aa22";
+                          return (
+                            <div key={t} style={{padding:"3px 6px",fontSize:10,color:isSel?selColor:"#ccc",background:isSel?selColor+"18":"transparent",borderRadius:3,display:"flex",alignItems:"center",gap:4}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?selColor+"18":"transparent";}}>
+                              <span onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,type:t,color:TYPE_COLORS[t]||f.color}:f));setKeypadState(null);}} style={{flex:1,cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t}>{t} <span style={{fontSize:8,color:"#666"}}>{DMX_PROFILES[t].channels}ch</span></span>
+                              {isCustom && <button onClick={e=>{e.stopPropagation();const prof=DMX_PROFILES[t];if(!prof)return;setBuilderEditName(t);setBuilderName(t);setBuilderColor(TYPE_COLORS[t]||"#888888");setBuilderParams(Object.entries(prof.map).map(([pid,m])=>({paramId:pid,offset:m.offset,bits:m.bits})));setKeypadState(null);setFixtureBuilderOpen(true);}} style={{width:18,height:18,background:"none",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:2,cursor:"pointer",fontSize:7,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}} title="Edit">✎</button>}
+                              <button onClick={e=>{e.stopPropagation();const visible=Object.keys(DMX_PROFILES).filter(k=>!hiddenProfiles.has(k));if(visible.length<=1)return alert("Cannot remove the last fixture type.");const fallback=visible.find(k=>k!==t)||"SPOT";if(!confirm("Remove '"+t+"' from fixture types?"+(fixtures.some(f=>f.type===t)?"\nFixtures using it will change to "+fallback+".":"")))return;if(isCustom){delete DMX_PROFILES[t];delete TYPE_COLORS[t];let custom={};try{custom=JSON.parse(localStorage.getItem("lumina-custom-profiles")||"{}");}catch(ee){}delete custom[t];localStorage.setItem("lumina-custom-profiles",JSON.stringify(custom));}else{setHiddenProfiles(prev=>{const s=new Set(prev);s.add(t);localStorage.setItem("lumina-hidden-profiles",JSON.stringify([...s]));return s;});}setFixtures(prev=>prev.map(f=>f.type===t?{...f,type:fallback,color:TYPE_COLORS[fallback]||f.color}:f));setCustomProfilesVer(v=>v+1);setKeypadState(null);}} style={{width:18,height:18,background:"none",border:"1px solid #ff444444",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}} title="Remove from list">✕</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>)}
+                  </div>
+                  <div style={{position:"relative"}}>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='pos_dropdown'&&prev.fxId===fx.id?null:{field:'pos_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:"#080a0e",border:"1px solid "+(keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id?POSITION_COLORS[fx.position||"FRONT 1"]||"#888":"#1e222a"),color:POSITION_COLORS[fx.position||"FRONT 1"]||"#888",borderRadius:2,padding:"3px 4px",fontSize:9,cursor:"pointer",userSelect:"none"}}>{fx.position||"FRONT 1"}</div>
+                    {keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id&&(<>
+                      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
+                      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-280),left:keypadState.rect.left,zIndex:10002,background:"#141820",border:"1px solid #44ffaa44",borderRadius:6,padding:4,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:140,display:"flex",flexDirection:"column",gap:1}}>
+                        {FIXTURE_POSITIONS.map(p=>{
+                          const posCol=POSITION_COLORS[p]||"#888";
+                          const isSel=(fx.position||"FRONT 1")===p;
+                          return (
+                            <div key={p} onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,position:p}:f));setKeypadState(null);}} style={{padding:"4px 8px",fontSize:10,color:isSel?posCol:"#ccc",background:isSel?posCol+"18":"transparent",borderRadius:3,cursor:"pointer",display:"flex",alignItems:"center",gap:6}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?posCol+"18":"transparent";}}>
+                              <div style={{width:6,height:6,borderRadius:"50%",background:posCol,flexShrink:0}}/>
+                              <span>{p}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>)}
+                  </div>
                   <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:(fxPatch.universe||1)+'.'+(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:70,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_dmx'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{(fxPatch.universe||1)}.{fxPatch.address||1}</div>
-                  <input type="color" value={fx.color} onChange={e=>{const c=e.target.value;setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));}} style={{width:28,height:22,border:"1px solid #1e222a",borderRadius:2,background:"none",cursor:"pointer",padding:0}}/>
+                  <div style={{position:"relative"}}>
+                    <div onClick={()=>setKeypadState(prev=>prev?.field==='fixture_color'&&prev.fxId===fx.id?null:{field:'fixture_color',fxId:fx.id})} style={{width:28,height:22,background:fx.color,border:"1px solid "+(keypadState?.field==='fixture_color'&&keypadState?.fxId===fx.id?"#fff":"#1e222a"),borderRadius:2,cursor:"pointer"}}/>
+                    {keypadState?.field==='fixture_color'&&keypadState?.fxId===fx.id&&(
+                      <div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:26,right:0,zIndex:10002,background:"#141820",border:"1px solid #333",borderRadius:6,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:3}}>
+                        {["#ff5544","#ff8844","#ffdd44","#44ff44","#44ffaa","#44aaff","#4466ff","#aa44ff","#ff44ff","#ff4488","#cccccc","#888888","#22ccaa","#ff6600","#ddaa00","#88ff44","#4488ff","#aa88ff"].map(c=>(
+                          <div key={c} onClick={()=>{setFixtures(prev=>prev.map(f=>f.id===fx.id?{...f,color:c}:f));setKeypadState(null);}} style={{width:22,height:22,background:c,borderRadius:3,cursor:"pointer",border:fx.color===c?"2px solid #fff":"2px solid transparent"}} title={c}/>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <button onClick={()=>{setFixtures(prev=>prev.filter(f=>f.id!==fx.id));}} style={{width:28,height:22,background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:2,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                 </div>
                 );
               })}
             </div>
             <div style={{padding:"8px 16px",borderTop:"1px solid #1e222a",display:"flex",gap:8}}>
-              <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:"#ff5544",type:"SPOT"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
+              <button onClick={()=>{const maxId=fixtures.reduce((m,f)=>Math.max(m,f.id),0);const defType=Object.keys(DMX_PROFILES).find(t=>!hiddenProfiles.has(t))||"SPOT";const newFx={id:maxId+1,name:`Fixture ${maxId+1}`,color:TYPE_COLORS[defType]||"#ff5544",type:defType,position:"FRONT 1"};setFixtures(prev=>[...prev,newFx]);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>+ ADD FIXTURE</button>
               <button onClick={()=>{setBuilderEditName(null);setBuilderName("");setBuilderColor("#ff5544");setBuilderParams([]);setFixtureBuilderOpen(true);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a0a1a",border:"1px solid #ff44ff44",color:"#ff44ff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>⚡ BUILD TYPE</button>
               <button onClick={()=>{
                 if(!fixtureLibraryData){
@@ -2332,7 +2701,54 @@ function LightingTimeline() {
                 setLibSearch("");setLibSelectedMfr(null);setLibSelectedFx(null);setLibSelectedMode(0);setLibAddCount(1);setLibQtyKeypad(null);
                 setFixtureLibraryOpen(true);
               }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a0a",border:"1px solid #ffaa4444",color:"#ffaa44",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>LIBRARY</button>
-              <button onClick={()=>{setDmxPatch(generateDefaultPatch(fixtures));setFixtureManagerOpen(false);}} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
+              <button onClick={()=>{
+                setDmxPatch(prev => {
+                  // Merge: keep existing custom addresses, only add defaults for new fixtures
+                  const merged = {};
+                  // Find the next available address for new fixtures
+                  let nextUni = 1, nextAddr = 1;
+                  // Collect used addresses from existing patch
+                  const usedAddrs = new Set();
+                  Object.values(prev).forEach(fp => usedAddrs.add(fp.universe + '.' + fp.address));
+                  fixtures.forEach(fx => {
+                    if (prev[fx.id]) {
+                      // Existing fixture — keep its current patch (update profile if type changed)
+                      const existing = prev[fx.id];
+                      const profile = DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT;
+                      if (existing.profile !== fx.type) {
+                        // Type changed — rebuild overrides with new profile at same address
+                        const ovs = {};
+                        Object.entries(profile.map).forEach(([pid, {offset, bits}]) => {
+                          ovs[pid] = { universe: existing.universe, channel: existing.address + offset, bits };
+                        });
+                        merged[fx.id] = { ...existing, profile: fx.type, overrides: ovs };
+                      } else {
+                        merged[fx.id] = existing;
+                      }
+                    } else {
+                      // New fixture — assign next available address
+                      const profile = DMX_PROFILES[fx.type] || DMX_PROFILES.SPOT;
+                      // Find next free slot
+                      while (usedAddrs.has(nextUni + '.' + nextAddr) || nextAddr + profile.channels - 1 > 512) {
+                        nextAddr++;
+                        if (nextAddr > 512) { nextUni++; nextAddr = 1; }
+                        if (nextUni > 64) break;
+                      }
+                      if (nextUni <= 64) {
+                        const ovs = {};
+                        Object.entries(profile.map).forEach(([pid, {offset, bits}]) => {
+                          ovs[pid] = { universe: nextUni, channel: nextAddr + offset, bits };
+                        });
+                        merged[fx.id] = { universe: nextUni, address: nextAddr, profile: fx.type, overrides: ovs };
+                        usedAddrs.add(nextUni + '.' + nextAddr);
+                        nextAddr += profile.channels;
+                      }
+                    }
+                  });
+                  return merged;
+                });
+                setFixtureManagerOpen(false);
+              }} style={{flex:1,padding:"6px 0",fontSize:10,background:"#1a1a2a",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer",letterSpacing:1,fontWeight:"bold"}}>APPLY & CLOSE</button>
             </div>
             {keypadState && keypadState.field==='fixture_dmx' && (() => {
               const applyDmx = (val) => {
@@ -2361,22 +2777,22 @@ function LightingTimeline() {
               const kpBack = () => setKeypadState(prev => ({...prev, value: prev.value.slice(0, -1)}));
               return (
                 <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}>
-                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-240),left:Math.min(keypadState.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #ff884466",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                  <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top, window.innerHeight-320),left:Math.min(keypadState.rect.left, window.innerWidth-222),width:210,background:"#141820",border:"1px solid #ff884466",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
-                      <span style={{fontSize:8,color:"#ff884488",letterSpacing:1}}>UNI . ADDRESS</span>
+                      <span style={{fontSize:9,color:"#ff884488",letterSpacing:1}}>UNI . ADDRESS</span>
                     </div>
-                    <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:3,padding:"6px 8px",fontSize:16,color:keypadState.dirty?"#ff8844":"#ff884466",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+                    <div style={{background:"#080a0e",border:"1px solid #ff884444",borderRadius:4,padding:"6px 10px",fontSize:16,color:keypadState.dirty?"#ff8844":"#ff884466",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{keypadState.value || '0'}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
                       {[1,2,3,4,5,6,7,8,9].map(d => (
-                        <button key={d} onClick={()=>kpPress(String(d))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                        <button key={d} onClick={()=>kpPress(String(d))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
                       ))}
-                      <button onClick={kpDot} style={{padding:"8px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #ff884444",color:"#ff8844",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>.</button>
-                      <button onClick={()=>kpPress('0')} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
-                      <button onClick={kpBack} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+                      <button onClick={kpDot} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #ff884444",color:"#ff8844",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>.</button>
+                      <button onClick={()=>kpPress('0')} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                      <button onClick={kpBack} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
-                      <button onClick={kpClear} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
-                      <button onClick={()=>{if(keypadState.dirty){applyDmx(keypadState.value);}else{setKeypadState(null);}}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                      <button onClick={kpClear} style={{minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                      <button onClick={()=>{if(keypadState.dirty){applyDmx(keypadState.value);}else{setKeypadState(null);}}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>ENTER</button>
                     </div>
                   </div>
                 </div>
@@ -2446,7 +2862,16 @@ function LightingTimeline() {
               <span style={{fontSize:9,color:"#888",letterSpacing:1}}>NAME</span>
               <input type="text" value={builderName} onChange={e=>setBuilderName(e.target.value.toUpperCase().replace(/\s+/g,'_'))} placeholder="MY_FIXTURE" style={{flex:1,background:"#080a0e",border:"1px solid #ff44ff44",color:"#ff44ff",borderRadius:3,padding:"5px 8px",fontSize:12,fontWeight:"bold",letterSpacing:1,fontFamily:"monospace"}}/>
               <span style={{fontSize:9,color:"#888",letterSpacing:1}}>COLOR</span>
-              <input type="color" value={builderColor} onChange={e=>setBuilderColor(e.target.value)} style={{width:32,height:26,border:"1px solid #1e222a",borderRadius:3,background:"none",cursor:"pointer",padding:0}}/>
+              <div style={{position:"relative"}}>
+                <div onClick={()=>setKeypadState(prev=>prev?.field==='builder_color'?null:{field:'builder_color'})} style={{width:32,height:26,background:builderColor,border:"1px solid "+(keypadState?.field==='builder_color'?"#fff":"#1e222a"),borderRadius:3,cursor:"pointer"}}/>
+                {keypadState?.field==='builder_color'&&(
+                  <div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:30,right:0,zIndex:10002,background:"#141820",border:"1px solid #333",borderRadius:6,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:3}}>
+                    {["#ff5544","#ff8844","#ffdd44","#44ff44","#44ffaa","#44aaff","#4466ff","#aa44ff","#ff44ff","#ff4488","#cccccc","#888888","#22ccaa","#ff6600","#ddaa00","#88ff44","#4488ff","#aa88ff"].map(c=>(
+                      <div key={c} onClick={()=>{setBuilderColor(c);setKeypadState(null);}} style={{width:22,height:22,background:c,borderRadius:3,cursor:"pointer",border:builderColor===c?"2px solid #fff":"2px solid transparent"}} title={c}/>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             {/* Parameter list header */}
             <div style={{display:"flex",padding:"6px 16px",gap:4,borderBottom:"1px solid #1a1d22",fontSize:8,color:"#555",letterSpacing:1}}>
@@ -2549,13 +2974,18 @@ function LightingTimeline() {
             {/* Header */}
             <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderBottom:"1px solid #1e222a",gap:8}}>
               <span style={{fontSize:12,fontWeight:"bold",color:"#ffaa44",letterSpacing:2}}>FIXTURE LIBRARY</span>
-              <span style={{fontSize:9,color:"#555"}}>{lib.fixtures.length} fixtures</span>
+              <div style={{display:"flex",gap:2,marginLeft:8}}>
+                <button onClick={()=>{setLibViewMode("library");setLibFolderSelectedProfile(null);}} style={{padding:"4px 10px",fontSize:9,fontWeight:"bold",background:libViewMode==="library"?"#ffaa4422":"transparent",border:"1px solid "+(libViewMode==="library"?"#ffaa4466":"#333"),color:libViewMode==="library"?"#ffaa44":"#666",borderRadius:"3px 0 0 3px",cursor:"pointer",letterSpacing:1}}>LIBRARY</button>
+                <button onClick={()=>{setLibViewMode("folders");setLibSelectedFx(null);setLibSelectedMfr(null);}} style={{padding:"4px 10px",fontSize:9,fontWeight:"bold",background:libViewMode==="folders"?"#44aaff22":"transparent",border:"1px solid "+(libViewMode==="folders"?"#44aaff66":"#333"),color:libViewMode==="folders"?"#44aaff":"#666",borderRadius:"0 3px 3px 0",cursor:"pointer",letterSpacing:1}}>MY FOLDERS</button>
+              </div>
               <span style={{flex:1}}/>
-              <input type="text" value={libSearch} onChange={e=>{setLibSearch(e.target.value);setLibSelectedFx(null);setLibSelectedMode(0);}} placeholder="Search manufacturer or fixture..." style={{width:220,background:"#080a0e",border:"1px solid #ffaa4433",color:"#ddd",borderRadius:3,padding:"5px 8px",fontSize:10}}/>
+              {libViewMode==="library" && <input type="text" value={libSearch} onChange={e=>{setLibSearch(e.target.value);setLibSelectedFx(null);setLibSelectedMode(0);}} placeholder="Search manufacturer or fixture..." style={{width:220,background:"#080a0e",border:"1px solid #ffaa4433",color:"#ddd",borderRadius:3,padding:"5px 8px",fontSize:10}}/>}
               <button onClick={()=>setFixtureLibraryOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>✕</button>
             </div>
             {/* Body: 3-column layout */}
             <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+
+            {libViewMode==="library" ? (<React.Fragment>
               {/* Left: Manufacturers */}
               <div style={{width:180,borderRight:"1px solid #1a1d22",display:"flex",flexDirection:"column"}}>
                 <div style={{padding:"6px 10px",fontSize:8,color:"#555",letterSpacing:1,borderBottom:"1px solid #1a1d22"}}>MANUFACTURERS ({mfrKeys.length})</div>
@@ -2617,31 +3047,74 @@ function LightingTimeline() {
                         </div>
                       </div>
                     )}
-                    {/* Add button with quantity */}
+                    {/* Add button with quantity + Save to folder */}
                     <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a",display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:9,color:"#888",letterSpacing:1}}>QTY</span>
                       <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setLibQtyKeypad({value:String(libAddCount),dirty:false,rect:{top:r.top,left:r.left}});}} style={{width:48,background:"#080a0e",border:"1px solid #44ffaa33",color:"#44ffaa",borderRadius:3,padding:"6px 4px",fontSize:13,textAlign:"center",fontFamily:"monospace",fontWeight:"bold",cursor:"pointer",userSelect:"none"}}>{libAddCount}</div>
                       <button onClick={addToProfiles} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD {libAddCount > 1 ? libAddCount + ' FIXTURES' : 'FIXTURE'}</button>
+                      <div style={{position:"relative"}}>
+                        <button onClick={()=>{
+                          if(!selFxObj||!selMode) return;
+                          const folderIds=Object.keys(userFolders);
+                          if(folderIds.length===0){alert("Create a folder first in MY FOLDERS tab");return;}
+                          // Build profile name (same logic as addToProfiles)
+                          const baseName=selFxObj.shortName?selFxObj.shortName.toUpperCase().replace(/[^A-Z0-9]/g,'_'):((lib.manufacturers[selFxObj.manufacturer]?.name||'').toUpperCase().replace(/[^A-Z0-9]/g,'_')+'_'+selFxObj.name.toUpperCase().replace(/[^A-Z0-9]/g,'_'));
+                          const modeSuffix=selFxObj.modes.length>1?'_'+selMode.channels+'CH':'';
+                          let profileName=(baseName+modeSuffix).replace(/_+/g,'_').replace(/^_|_$/g,'');
+                          if(profileName.length>32) profileName=profileName.slice(0,32).replace(/_$/,'');
+                          setLibFolderSavePicker(libFolderSavePicker?null:{profileName,map:selMode.map,channels:selMode.channels});
+                        }} style={{padding:"8px 10px",fontSize:11,fontWeight:"bold",background:"#0a0a1a",border:"2px solid #44aaff44",color:"#44aaff",borderRadius:4,cursor:"pointer"}}>★</button>
+                        {/* Save-to-folder picker popup */}
+                        {libFolderSavePicker && (
+                          <div style={{position:"absolute",bottom:"100%",right:0,marginBottom:4,width:180,background:"#141820",border:"1px solid #44aaff66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:6,zIndex:10005}}>
+                            <div style={{fontSize:8,color:"#44aaff88",letterSpacing:1,padding:"2px 6px",marginBottom:4}}>SAVE TO FOLDER</div>
+                            {Object.entries(userFolders).map(([fid,folder])=>(
+                              <div key={fid} onClick={()=>{
+                                const pn=libFolderSavePicker.profileName;
+                                // Ensure profile exists in custom profiles
+                                if(!DMX_PROFILES[pn]){
+                                  const prof={channels:libFolderSavePicker.channels,map:libFolderSavePicker.map,color:"#ffaa44"};
+                                  DMX_PROFILES[pn]={channels:prof.channels,map:prof.map};
+                                  TYPE_COLORS[pn]=prof.color;
+                                  let custom={};try{custom=JSON.parse(localStorage.getItem("lumina-custom-profiles")||"{}");}catch(e){}
+                                  custom[pn]=prof;localStorage.setItem("lumina-custom-profiles",JSON.stringify(custom));
+                                  setCustomProfilesVer(v=>v+1);
+                                }
+                                // Add to folder
+                                const updated={...userFolders};
+                                const f={...updated[fid]};
+                                if(!f.profiles.includes(pn)){f.profiles=[...f.profiles,pn];updated[fid]=f;saveUserFolders(updated);}
+                                setLibFolderSavePicker(null);
+                              }} style={{padding:"5px 8px",fontSize:10,color:"#ccc",cursor:"pointer",borderRadius:3,display:"flex",alignItems:"center",gap:6}} onMouseEnter={e=>e.currentTarget.style.background="#44aaff18"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                                <span style={{color:"#44aaff"}}>📁</span>
+                                <span>{folder.name}</span>
+                                <span style={{fontSize:8,color:"#555",marginLeft:"auto"}}>{folder.profiles.length}</span>
+                              </div>
+                            ))}
+                            {Object.keys(userFolders).length===0 && <div style={{padding:8,fontSize:9,color:"#555",textAlign:"center"}}>No folders yet</div>}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {/* QTY Keypad */}
                     {libQtyKeypad && (
                       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10004}} onClick={()=>setLibQtyKeypad(null)}>
-                        <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(libQtyKeypad.rect.top - 260, window.innerHeight-260),left:Math.min(libQtyKeypad.rect.left, window.innerWidth-160),width:150,background:"#141820",border:"1px solid #44ffaa66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:8,display:"flex",flexDirection:"column",gap:4}}>
+                        <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(libQtyKeypad.rect.top - 320, window.innerHeight-320),left:Math.min(libQtyKeypad.rect.left, window.innerWidth-222),width:210,background:"#141820",border:"1px solid #44ffaa66",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
-                            <span style={{fontSize:8,color:"#44ffaa88",letterSpacing:1}}>QUANTITY</span>
+                            <span style={{fontSize:9,color:"#44ffaa88",letterSpacing:1}}>QUANTITY</span>
                           </div>
-                          <div style={{background:"#080a0e",border:"1px solid #44ffaa44",borderRadius:3,padding:"6px 8px",fontSize:16,color:libQtyKeypad.dirty?"#44ffaa":"#44ffaa66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{libQtyKeypad.value || '0'}</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+                          <div style={{background:"#080a0e",border:"1px solid #44ffaa44",borderRadius:4,padding:"6px 10px",fontSize:16,color:libQtyKeypad.dirty?"#44ffaa":"#44ffaa66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{libQtyKeypad.value || '0'}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
                             {[1,2,3,4,5,6,7,8,9].map(d => (
-                              <button key={d} onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+d}):({...prev,value:String(d),dirty:true}))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
+                              <button key={d} onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+d}):({...prev,value:String(d),dirty:true}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>
                             ))}
                             <div/>
-                            <button onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+'0'}):({...prev,value:'0',dirty:true}))} style={{padding:"8px 0",fontSize:14,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:3,cursor:"pointer",fontFamily:"monospace"}}>0</button>
-                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:prev.value.slice(0,-1)}))} style={{padding:"8px 0",fontSize:12,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:3,cursor:"pointer"}}>&#9003;</button>
+                            <button onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+'0'}):({...prev,value:'0',dirty:true}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:prev.value.slice(0,-1)}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
                           </div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
-                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:'',dirty:true}))} style={{padding:"8px 0",fontSize:10,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:3,cursor:"pointer",letterSpacing:1}}>CLR</button>
-                            <button onClick={()=>{if(libQtyKeypad.dirty){const v=Math.max(1,Math.min(64,parseInt(libQtyKeypad.value)||1));setLibAddCount(v);}setLibQtyKeypad(null);}} style={{padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:3,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:'',dirty:true}))} style={{minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                            <button onClick={()=>{if(libQtyKeypad.dirty){const v=Math.max(1,Math.min(64,parseInt(libQtyKeypad.value)||1));setLibAddCount(v);}setLibQtyKeypad(null);}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>ENTER</button>
                           </div>
                         </div>
                       </div>
@@ -2649,7 +3122,198 @@ function LightingTimeline() {
                   </React.Fragment>
                 )}
               </div>
+            </React.Fragment>) : (<React.Fragment>
+              {/* ===== MY FOLDERS VIEW ===== */}
+              {/* Left: Folder List */}
+              <div style={{width:200,borderRight:"1px solid #1a1d22",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"6px 10px",fontSize:8,color:"#44aaff88",letterSpacing:1,borderBottom:"1px solid #1a1d22",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span>MY FOLDERS ({Object.keys(userFolders).length})</span>
+                  <button onClick={()=>{
+                    const fid='f_'+Date.now();
+                    const updated={...userFolders,[fid]:{name:'New Folder',profiles:[]}};
+                    saveUserFolders(updated);
+                    setLibSelectedFolder(fid);
+                    setLibFolderSelectedProfile(null);
+                    setLibFolderKeyboard({folderId:fid,value:'New Folder',isNew:true});
+                  }} style={{padding:"2px 8px",fontSize:10,fontWeight:"bold",background:"#44aaff18",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:3,cursor:"pointer"}}>+</button>
+                </div>
+                <div style={{flex:1,overflowY:"auto"}}>
+                  {Object.keys(userFolders).length===0 && <div style={{padding:16,textAlign:"center",fontSize:10,color:"#444"}}>No folders yet{"\n"}Click + to create one</div>}
+                  {Object.entries(userFolders).map(([fid,folder])=>(
+                    <div key={fid} onClick={()=>{setLibSelectedFolder(fid);setLibFolderSelectedProfile(null);}} style={{padding:"6px 10px",fontSize:10,color:libSelectedFolder===fid?"#44aaff":"#999",background:libSelectedFolder===fid?"#44aaff11":"transparent",cursor:"pointer",borderBottom:"1px solid #0e1018",display:"flex",alignItems:"center",gap:6}} onMouseEnter={e=>e.currentTarget.style.background=libSelectedFolder===fid?"#44aaff18":"#ffffff08"} onMouseLeave={e=>e.currentTarget.style.background=libSelectedFolder===fid?"#44aaff11":"transparent"}>
+                      <span style={{fontSize:12}}>📁</span>
+                      <span style={{flex:1,fontWeight:libSelectedFolder===fid?"bold":"normal",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{folder.name}</span>
+                      <span style={{fontSize:8,color:"#555"}}>{folder.profiles.length}</span>
+                      <button onClick={e=>{e.stopPropagation();setLibFolderKeyboard({folderId:fid,value:folder.name,isNew:false});}} style={{padding:"1px 4px",fontSize:9,background:"none",border:"none",color:"#44aaff66",cursor:"pointer"}}>✎</button>
+                      <button onClick={e=>{e.stopPropagation();if(confirm('Delete folder "'+folder.name+'"?')){const updated={...userFolders};delete updated[fid];saveUserFolders(updated);if(libSelectedFolder===fid){setLibSelectedFolder(null);setLibFolderSelectedProfile(null);}}}} style={{padding:"1px 4px",fontSize:9,background:"none",border:"none",color:"#ff554466",cursor:"pointer"}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Middle: Folder Profiles */}
+              <div style={{width:240,borderRight:"1px solid #1a1d22",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"6px 10px",fontSize:8,color:"#44aaff88",letterSpacing:1,borderBottom:"1px solid #1a1d22"}}>
+                  {libSelectedFolder && userFolders[libSelectedFolder] ? userFolders[libSelectedFolder].name.toUpperCase() : 'PROFILES'}
+                  {libSelectedFolder && userFolders[libSelectedFolder] ? ' ('+userFolders[libSelectedFolder].profiles.length+')' : ''}
+                </div>
+                <div style={{flex:1,overflowY:"auto"}}>
+                  {!libSelectedFolder && <div style={{padding:16,textAlign:"center",fontSize:10,color:"#444"}}>Select a folder</div>}
+                  {libSelectedFolder && userFolders[libSelectedFolder] && userFolders[libSelectedFolder].profiles.length===0 && <div style={{padding:16,textAlign:"center",fontSize:10,color:"#444"}}>No profiles yet{"\n"}Use + ADD PROFILE or ★ in Library</div>}
+                  {libSelectedFolder && userFolders[libSelectedFolder] && userFolders[libSelectedFolder].profiles.map(pn=>{
+                    const prof=DMX_PROFILES[pn];
+                    if(!prof) return null;
+                    const isSelected=libFolderSelectedProfile===pn;
+                    return <div key={pn} onClick={()=>setLibFolderSelectedProfile(pn)} style={{padding:"6px 10px",fontSize:10,color:isSelected?"#44aaff":"#bbb",background:isSelected?"#44aaff11":"transparent",cursor:"pointer",borderBottom:"1px solid #0e1018",display:"flex",alignItems:"center",gap:6}} onMouseEnter={e=>e.currentTarget.style.background=isSelected?"#44aaff18":"#ffffff08"} onMouseLeave={e=>e.currentTarget.style.background=isSelected?"#44aaff11":"transparent"}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:TYPE_COLORS[pn]||"#888",flexShrink:0}}/>
+                      <span style={{flex:1,fontWeight:isSelected?"bold":"normal",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pn}</span>
+                      <span style={{fontSize:8,color:"#555"}}>{prof.channels}ch</span>
+                      <button onClick={e=>{e.stopPropagation();const updated={...userFolders};const f={...updated[libSelectedFolder]};f.profiles=f.profiles.filter(p=>p!==pn);updated[libSelectedFolder]=f;saveUserFolders(updated);if(libFolderSelectedProfile===pn)setLibFolderSelectedProfile(null);}} style={{padding:"1px 4px",fontSize:9,background:"none",border:"none",color:"#ff554466",cursor:"pointer"}}>✕</button>
+                    </div>;
+                  })}
+                </div>
+                {/* + ADD PROFILE button */}
+                {libSelectedFolder && userFolders[libSelectedFolder] && (
+                  <div style={{padding:"6px 10px",borderTop:"1px solid #1a1d22",position:"relative"}}>
+                    <button onClick={()=>setLibFolderProfilePicker(!libFolderProfilePicker)} style={{width:"100%",padding:"6px 0",fontSize:10,fontWeight:"bold",background:"#44aaff11",border:"1px solid #44aaff44",color:"#44aaff",borderRadius:4,cursor:"pointer",letterSpacing:1}}>+ ADD PROFILE</button>
+                    {/* Profile picker popup */}
+                    {libFolderProfilePicker && (
+                      <div style={{position:"absolute",bottom:"100%",left:0,right:0,marginBottom:4,maxHeight:250,overflowY:"auto",background:"#141820",border:"1px solid #44aaff66",borderRadius:6,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:4,zIndex:10005}}>
+                        <div style={{fontSize:8,color:"#44aaff88",letterSpacing:1,padding:"4px 8px"}}>AVAILABLE PROFILES</div>
+                        {Object.keys(DMX_PROFILES).filter(t=>!hiddenProfiles.has(t)).map(pn=>{
+                          const alreadyIn=userFolders[libSelectedFolder].profiles.includes(pn);
+                          return <div key={pn} onClick={()=>{
+                            if(alreadyIn) return;
+                            const updated={...userFolders};
+                            const f={...updated[libSelectedFolder]};
+                            f.profiles=[...f.profiles,pn];
+                            updated[libSelectedFolder]=f;
+                            saveUserFolders(updated);
+                          }} style={{padding:"4px 8px",fontSize:10,color:alreadyIn?"#44aaff44":"#ccc",cursor:alreadyIn?"default":"pointer",borderRadius:3,display:"flex",alignItems:"center",gap:6,opacity:alreadyIn?0.4:1}} onMouseEnter={e=>{if(!alreadyIn)e.currentTarget.style.background="#44aaff18";}} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <span style={{width:6,height:6,borderRadius:"50%",background:TYPE_COLORS[pn]||"#888"}}/>
+                            <span>{pn}</span>
+                            <span style={{fontSize:8,color:"#555",marginLeft:"auto"}}>{DMX_PROFILES[pn].channels}ch</span>
+                            {alreadyIn && <span style={{fontSize:8,color:"#44aaff44"}}>✓</span>}
+                          </div>;
+                        })}
+                        <div style={{padding:"4px 8px",textAlign:"center"}}><button onClick={()=>setLibFolderProfilePicker(false)} style={{fontSize:9,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,padding:"3px 12px",cursor:"pointer"}}>CLOSE</button></div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Right: Profile Details */}
+              <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+                {(() => {
+                  const selProf = libFolderSelectedProfile ? DMX_PROFILES[libFolderSelectedProfile] : null;
+                  if (!selProf) return <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#444",fontSize:11}}>Select a profile to see details</div>;
+                  return <React.Fragment>
+                    <div style={{padding:"10px 14px",borderBottom:"1px solid #1a1d22"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{width:10,height:10,borderRadius:"50%",background:TYPE_COLORS[libFolderSelectedProfile]||"#888"}}/>
+                        <span style={{fontSize:13,fontWeight:"bold",color:"#44aaff"}}>{libFolderSelectedProfile}</span>
+                      </div>
+                      <div style={{fontSize:9,color:"#777",marginTop:2}}>{selProf.channels} channels</div>
+                    </div>
+                    {/* Channel map */}
+                    <div style={{flex:1,overflowY:"auto",padding:"8px 14px"}}>
+                      <div style={{fontSize:8,color:"#555",letterSpacing:1,marginBottom:6}}>CHANNEL MAP {"\u00B7"} {selProf.channels} CHANNELS</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {Object.entries(selProf.map).sort((a,b)=>a[1].offset-b[1].offset).map(([pid,{offset,bits}]) => {
+                          const p = ALL_PARAMS.find(pp=>pp.id===pid);
+                          return <div key={pid} style={{padding:"4px 8px",background:"#0a0c12",border:"1px solid "+(p?.color||"#555")+"44",borderRadius:3,fontSize:9,display:"flex",gap:6,alignItems:"center"}}>
+                            <span style={{color:p?.color||"#888",fontWeight:"bold"}}>{p?.label||pid}</span>
+                            <span style={{color:"#555",fontSize:8}}>ch{offset+1}{bits===16?"-"+(offset+2):""}</span>
+                          </div>;
+                        })}
+                      </div>
+                    </div>
+                    {/* Add fixture button */}
+                    <div style={{padding:"10px 14px",borderTop:"1px solid #1e222a",display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:9,color:"#888",letterSpacing:1}}>QTY</span>
+                      <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setLibQtyKeypad({value:String(libAddCount),dirty:false,rect:{top:r.top,left:r.left}});}} style={{width:48,background:"#080a0e",border:"1px solid #44ffaa33",color:"#44ffaa",borderRadius:3,padding:"6px 4px",fontSize:13,textAlign:"center",fontFamily:"monospace",fontWeight:"bold",cursor:"pointer",userSelect:"none"}}>{libAddCount}</div>
+                      <button onClick={()=>{
+                        const pn=libFolderSelectedProfile;
+                        const count=Math.max(1,Math.min(64,libAddCount||1));
+                        setFixtures(prev=>{
+                          const maxId=prev.reduce((m,f)=>Math.max(m,f.id),0);
+                          const newFx=[];
+                          for(let i=0;i<count;i++){
+                            newFx.push({id:maxId+1+i,name:pn.replace(/_/g,' ')+(count>1?' '+(i+1):''),color:TYPE_COLORS[pn]||"#ffaa44",type:pn,position:'FRONT 1'});
+                          }
+                          return [...prev,...newFx];
+                        });
+                        setFixtureLibraryOpen(false);
+                      }} style={{flex:1,padding:"8px 0",fontSize:11,fontWeight:"bold",background:"#0a1a0a",border:"2px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>+ ADD {libAddCount > 1 ? libAddCount + ' FIXTURES' : 'FIXTURE'}</button>
+                    </div>
+                    {/* QTY Keypad (shared) */}
+                    {libQtyKeypad && (
+                      <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10004}} onClick={()=>setLibQtyKeypad(null)}>
+                        <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(libQtyKeypad.rect.top-320,window.innerHeight-320),left:Math.min(libQtyKeypad.rect.left,window.innerWidth-222),width:210,background:"#141820",border:"1px solid #44ffaa66",borderRadius:8,boxShadow:"0 8px 30px rgba(0,0,0,0.9)",padding:12,display:"flex",flexDirection:"column",gap:5}}>
+                          <div style={{display:"flex",alignItems:"center",marginBottom:2}}><span style={{fontSize:9,color:"#44ffaa88",letterSpacing:1}}>QUANTITY</span></div>
+                          <div style={{background:"#080a0e",border:"1px solid #44ffaa44",borderRadius:4,padding:"6px 10px",fontSize:16,color:libQtyKeypad.dirty?"#44ffaa":"#44ffaa66",fontFamily:"monospace",textAlign:"right",minHeight:24,letterSpacing:2}}>{libQtyKeypad.value||'0'}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                            {[1,2,3,4,5,6,7,8,9].map(d=>(<button key={d} onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+d}):({...prev,value:String(d),dirty:true}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>{d}</button>))}
+                            <div/>
+                            <button onClick={()=>setLibQtyKeypad(prev=>prev.dirty?({...prev,value:prev.value+'0'}):({...prev,value:'0',dirty:true}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace"}}>0</button>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:prev.value.slice(0,-1)}))} style={{minWidth:42,minHeight:42,padding:"10px 0",fontSize:14,background:"#1a1e28",border:"1px solid #252930",color:"#888",borderRadius:4,cursor:"pointer"}}>&#9003;</button>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                            <button onClick={()=>setLibQtyKeypad(prev=>({...prev,value:'',dirty:true}))} style={{minHeight:42,padding:"10px 0",fontSize:12,fontWeight:"bold",background:"#1c0a0a",border:"1px solid #ff333344",color:"#ff5544",borderRadius:4,cursor:"pointer",letterSpacing:1}}>CLR</button>
+                            <button onClick={()=>{if(libQtyKeypad.dirty){const v=Math.max(1,Math.min(64,parseInt(libQtyKeypad.value)||1));setLibAddCount(v);}setLibQtyKeypad(null);}} style={{minHeight:42,padding:"10px 0",fontSize:13,fontWeight:"bold",background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,cursor:"pointer",letterSpacing:2}}>ENTER</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </React.Fragment>;
+                })()}
+              </div>
+            </React.Fragment>)}
+
             </div>
+            {/* Folder Rename Keyboard */}
+            {libFolderKeyboard && (
+              <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10005}} onClick={()=>setLibFolderKeyboard(null)}>
+                {(() => {
+                  const color='#44aaff';
+                  const caps=libFolderKeyboard.caps!==false;
+                  const kbRows=[['1','2','3','4','5','6','7','8','9','0'],['Q','W','E','R','T','Y','U','I','O','P'],['A','S','D','F','G','H','J','K','L'],['Z','X','C','V','B','N','M']];
+                  const kbPress=(ch)=>setLibFolderKeyboard(prev=>({...prev,value:prev.value+(prev.caps!==false?ch:ch.toLowerCase())}));
+                  const kbBack=()=>setLibFolderKeyboard(prev=>({...prev,value:prev.value.slice(0,-1)}));
+                  const kbClear=()=>setLibFolderKeyboard(prev=>({...prev,value:''}));
+                  const kbCaps=()=>setLibFolderKeyboard(prev=>({...prev,caps:!prev.caps}));
+                  const btnStyle={minWidth:42,minHeight:42,padding:"10px 0",fontSize:16,fontWeight:"bold",background:"#1a1e28",border:"1px solid #252930",color:"#ddd",borderRadius:4,cursor:"pointer",fontFamily:"monospace",flex:1};
+                  return (
+                    <div onClick={e=>e.stopPropagation()} style={{position:"fixed",bottom:10,left:"50%",transform:"translateX(-50%)",width:660,background:"#141820",border:"1px solid "+color+"66",borderRadius:8,boxShadow:"0 -4px 30px rgba(0,0,0,0.9)",padding:"12px 12px 14px",display:"flex",flexDirection:"column",gap:5}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                        <span style={{fontSize:9,color:color+"88",letterSpacing:1}}>FOLDER NAME</span>
+                        <div style={{flex:1,background:"#080a0e",border:"1px solid "+color+"44",borderRadius:4,padding:"6px 10px",fontSize:16,color:color,fontFamily:"monospace",minHeight:24,letterSpacing:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{libFolderKeyboard.value||<span style={{color:color+"44"}}>...</span>}</div>
+                      </div>
+                      {kbRows.map((row,ri)=>(
+                        <div key={ri} style={{display:"flex",gap:4,justifyContent:"center"}}>
+                          {ri===3 && <button onClick={kbCaps} style={{...btnStyle,minWidth:52,fontSize:10,color:caps?"#44ffaa":"#666",background:caps?"#0a1a0a":"#1a1e28",border:caps?"1px solid #44ffaa44":"1px solid #252930"}}>CAPS</button>}
+                          {row.map(ch=>(<button key={ch} onClick={()=>kbPress(ch)} style={btnStyle}>{caps?ch:ch.toLowerCase()}</button>))}
+                          {ri===3 && <button onClick={kbBack} style={{...btnStyle,minWidth:52,fontSize:14,color:"#888"}}>⌫</button>}
+                        </div>
+                      ))}
+                      <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                        <button onClick={kbClear} style={{...btnStyle,minWidth:52,fontSize:10,color:"#ff5544",background:"#1c0a0a",border:"1px solid #ff333344"}}>CLR</button>
+                        <button onClick={()=>kbPress('-')} style={btnStyle}>-</button>
+                        <button onClick={()=>kbPress('_')} style={btnStyle}>_</button>
+                        <button onClick={()=>kbPress('.')} style={btnStyle}>.</button>
+                        <button onClick={()=>setLibFolderKeyboard(prev=>({...prev,value:prev.value+' '}))} style={{...btnStyle,minWidth:180}}>SPACE</button>
+                        <button onClick={()=>{
+                          const name=libFolderKeyboard.value.trim()||'New Folder';
+                          const updated={...userFolders};
+                          if(updated[libFolderKeyboard.folderId]){updated[libFolderKeyboard.folderId]={...updated[libFolderKeyboard.folderId],name};}
+                          saveUserFolders(updated);
+                          setLibFolderKeyboard(null);
+                        }} style={{...btnStyle,minWidth:80,fontSize:14,color:"#44ffaa",background:"#0a1a0a",border:"1px solid #44ffaa44"}}>ENTER</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         </div>
         );
@@ -2793,12 +3457,14 @@ function LightingTimeline() {
           <div onClick={e=>e.stopPropagation()} style={{flex:1,display:"flex",flexDirection:"column",margin:20,background:"#0a0c14",border:"1px solid #1e2a44",borderRadius:8,overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.9)"}}>
             <div style={{display:"flex",alignItems:"center",padding:"8px 16px",borderBottom:"1px solid #1e2a44",gap:8}}>
               <span style={{fontSize:12,fontWeight:"bold",color:"#4488ff",letterSpacing:2}}>{"\u25A3"} DMX MONITOR</span>
-              <div style={{display:"flex",gap:2,marginLeft:12,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:2,marginLeft:12,flexWrap:"wrap",alignItems:"center"}}>
+                <button onClick={()=>setMonitorShowAll(p=>!p)} style={{padding:"2px 6px",fontSize:7,fontWeight:"bold",background:monitorShowAll?"#1a2a44":"#0c0e12",border:"1px solid "+(monitorShowAll?"#4488ff":"#4488ff44"),color:monitorShowAll?"#4488ff":"#4488ff66",borderRadius:3,cursor:"pointer",letterSpacing:1,minWidth:24}}>ALL</button>
                 {Array.from({length:64},(_,i)=>i+1).map(u=>{
                   const md=monitorDataRef.current[u];
                   const hasData=md&&(md.input.some(v=>v>0)||md.output.some(v=>v>0));
-                  if(u>4&&!hasData&&u!==monitorUniverse) return null;
-                  return <button key={u} onClick={()=>setMonitorUniverse(u)} style={{padding:"2px 6px",fontSize:8,fontWeight:monitorUniverse===u?"bold":"normal",background:monitorUniverse===u?"#1a2a44":"#0c0e12",border:"1px solid "+(monitorUniverse===u?"#4488ff":hasData?"#4488ff44":"#1e222a"),color:monitorUniverse===u?"#4488ff":hasData?"#4488ff88":"#333",borderRadius:3,cursor:"pointer",minWidth:24}}>{u}</button>;
+                  const isPatched=usedUniverses.includes(u);
+                  if(!monitorShowAll&&u>4&&!hasData&&!isPatched&&u!==monitorUniverse) return null;
+                  return <button key={u} onClick={()=>setMonitorUniverse(u)} style={{padding:"2px 6px",fontSize:8,fontWeight:monitorUniverse===u?"bold":"normal",background:monitorUniverse===u?"#1a2a44":"#0c0e12",border:"1px solid "+(monitorUniverse===u?"#4488ff":hasData?"#4488ff44":isPatched?"#ff884433":"#1e222a"),color:monitorUniverse===u?"#4488ff":hasData?"#4488ff88":isPatched?"#ff884488":"#333",borderRadius:3,cursor:"pointer",minWidth:24}}>{u}</button>;
                 })}
               </div>
               <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:12}}>
@@ -2810,7 +3476,7 @@ function LightingTimeline() {
                   <div style={{width:8,height:8,borderRadius:2,background:"#44cc4455"}}/>
                   <span style={{fontSize:8,color:"#44cc4488"}}>LUMINA</span>
                 </div>
-                <span style={{fontSize:8,color:"#333"}}>UNI {monitorUniverse}</span>
+                <span style={{fontSize:10,color:"#4488ff",fontWeight:"bold",letterSpacing:1}}>UNI {monitorUniverse}</span>
                 <button onClick={()=>setDmxMonitorOpen(false)} style={{padding:"4px 10px",fontSize:11,background:"none",border:"1px solid #333",color:"#666",borderRadius:3,cursor:"pointer"}}>{"\u2715"}</button>
               </div>
             </div>
@@ -2835,8 +3501,8 @@ function LightingTimeline() {
                       ?`rgba(68,204,68,${Math.max(0.15,brightness*0.5)})`
                       :val>0?`rgba(68,136,255,${Math.max(0.1,brightness*0.3)})`
                       :"rgba(255,255,255,0.05)";
-                    return <div key={i} style={{padding:"3px 2px",background:bgColor,border:`1px solid ${borderColor}`,borderRadius:2,textAlign:"center",minHeight:28,display:"flex",flexDirection:"column",justifyContent:"center",cursor:"default"}} title={`Ch ${i+1} | IN: ${inVal} | OUT: ${val}${isOverride?" (LUMINA)":""}`}>
-                      <div style={{fontSize:7,color:"#555",lineHeight:1}}>{i+1}</div>
+                    return <div key={i} style={{padding:"3px 2px",background:bgColor,border:`1px solid ${borderColor}`,borderRadius:2,textAlign:"center",minHeight:28,display:"flex",flexDirection:"column",justifyContent:"center",cursor:"default"}} title={`${monitorUniverse}.${i+1} | IN: ${inVal} | OUT: ${val}${isOverride?" (LUMINA)":""}`}>
+                      <div style={{fontSize:7,color:"#555",lineHeight:1}}>{monitorUniverse}.{i+1}</div>
                       <div style={{fontSize:10,fontWeight:val>0?"bold":"normal",color:isOverride?(val>0?"#44cc44":"#1a3a1a"):val>0?"#4488ff":"#1a1a22",lineHeight:1.2}}>{val}</div>
                     </div>;
                   })}

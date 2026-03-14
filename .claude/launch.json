@@ -11,7 +11,14 @@
       "name": "lighting-app",
       "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
       "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/lighting-server.js"],
-      "port": 3457
+      "port": 3457,
+      "autoPort": false
+    },
+    {
+      "name": "media-app",
+      "runtimeExecutable": "/Users/shaishtarker/.nvm/versions/node/v24.14.0/bin/node",
+      "runtimeArgs": ["/Users/shaishtarker/Documents/cloude code/media-server.js"],
+      "port": 3458
     }
   ]
 }

@@ -84,6 +84,11 @@ let networkConfig = {
 // --- Per-client protocol config ---
 let clientConfig = { artnet: true, sacn: false, artnetHost: '255.255.255.255' };
 
+// --- Per-universe routing config (sparse: only custom-routed universes listed) ---
+// Format: { "1": { artnet: { ip, universe }, sacn: { universe } }, ... }
+// Missing entries use global defaults (artnetHost, uni-1 for ArtNet, uni for sACN)
+let universeRoutingConfig = {};
+
 // --- Output loop config ---
 let outputRate = 25; // ms between frames (40Hz)
 let outputInterval = null;
@@ -96,7 +101,120 @@ const MONITOR_EVERY = 4; // send monitor data every N merge ticks (~10Hz at 40Hz
 
 // --- HTTP Server ---
 const fixtureLibraryPath = path.join(__dirname, 'fixture-library.json');
-const server = http.createServer((req, res) => {
+
+// Shows folder on Desktop
+const SHOWS_DIR = path.join(os.homedir(), 'Desktop', 'Lumina Shows');
+if (!fs.existsSync(SHOWS_DIR)) {
+  fs.mkdirSync(SHOWS_DIR, { recursive: true });
+  console.log('[SHOWS] Created folder:', SHOWS_DIR);
+}
+
+// Helper to read full request body
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    req.on('error', reject);
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  // CORS headers for all responses
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // --- Save show to Desktop/Lumina Shows/<name> — <date>/ ---
+  if (req.url === '/api/save-show' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const data = JSON.parse(body);
+      const name = (data.showName || 'my-show').replace(/[^a-zA-Z0-9_\- ]/g, '_');
+      const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const folderName = name + ' — ' + dateStr;
+      const folderPath = path.join(SHOWS_DIR, folderName);
+      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+      const filename = name + '.lumina';
+      const filepath = path.join(folderPath, filename);
+      fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
+      // Save sequences and MIDI map as separate files in the sub-folder
+      if (data.sequenceStorage) {
+        fs.writeFileSync(path.join(folderPath, 'sequences.json'), JSON.stringify(data.sequenceStorage, null, 2));
+      }
+      if (data.midiMap && Object.keys(data.midiMap).length > 0) {
+        fs.writeFileSync(path.join(folderPath, 'midi-map.json'), JSON.stringify(data.midiMap, null, 2));
+      }
+      console.log('[SHOWS] Saved:', filepath);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, folder: folderName, filename, path: filepath }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // --- List shows from Desktop/Lumina Shows/ (scan sub-folders) ---
+  if (req.url === '/api/list-shows' && req.method === 'GET') {
+    try {
+      const shows = [];
+      const entries = fs.readdirSync(SHOWS_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          // Scan sub-folder for .lumina files
+          const subPath = path.join(SHOWS_DIR, entry.name);
+          const subFiles = fs.readdirSync(subPath).filter(f => f.endsWith('.lumina'));
+          for (const f of subFiles) {
+            const fp = path.join(subPath, f);
+            const stat = fs.statSync(fp);
+            let showName = f.replace('.lumina', '');
+            try {
+              const raw = JSON.parse(fs.readFileSync(fp, 'utf8'));
+              if (raw.showName) showName = raw.showName;
+            } catch(e) {}
+            shows.push({ folder: entry.name, filename: f, showName, size: stat.size, modified: stat.mtime.toISOString() });
+          }
+        } else if (entry.name.endsWith('.lumina')) {
+          // Legacy: .lumina file at root level
+          const fp = path.join(SHOWS_DIR, entry.name);
+          const stat = fs.statSync(fp);
+          let showName = entry.name.replace('.lumina', '');
+          try {
+            const raw = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            if (raw.showName) showName = raw.showName;
+          } catch(e) {}
+          shows.push({ folder: null, filename: entry.name, showName, size: stat.size, modified: stat.mtime.toISOString() });
+        }
+      }
+      shows.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, shows, dir: SHOWS_DIR }));
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, shows: [], dir: SHOWS_DIR }));
+    }
+    return;
+  }
+
+  // --- Load a specific show (supports folder/filename or legacy root filename) ---
+  if (req.url.startsWith('/api/load-show/') && req.method === 'GET') {
+    const rawPath = decodeURIComponent(req.url.replace('/api/load-show/', ''));
+    // rawPath can be "folder/filename.lumina" or just "filename.lumina" (legacy)
+    const filepath = path.join(SHOWS_DIR, rawPath);
+    try {
+      if (!fs.existsSync(filepath)) { res.writeHead(404); res.end(JSON.stringify({ ok: false, error: 'File not found' })); return; }
+      const data = fs.readFileSync(filepath, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(data);
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // Serve fixture library JSON
   if (req.url === '/fixture-library.json') {
     fs.readFile(fixtureLibraryPath, (err, data) => {
@@ -160,7 +278,7 @@ function buildArtNetPacket(universe, dmxData) {
   buf[12] = artnetSequence & 0xFF;
   artnetSequence = (artnetSequence + 1) & 0xFF;
   buf[13] = 0;
-  buf.writeUInt16LE(Math.max(0, universe - 1), 14);
+  buf.writeUInt16LE(Math.max(0, universe), 14); // caller provides 0-indexed ArtNet universe
   buf.writeUInt16BE(512, 16);
   for (let i = 0; i < 512; i++) buf[18 + i] = dmxData[i] || 0;
   return buf;
@@ -289,13 +407,23 @@ function isValidIP(ip) {
 }
 
 function sendUniverse(universe, data) {
-  if (clientConfig.artnet && isValidIP(clientConfig.artnetHost)) {
-    const packet = buildArtNetPacket(universe, data);
-    artnetSocket.send(packet, 0, packet.length, ARTNET_PORT, clientConfig.artnetHost);
+  const route = universeRoutingConfig[String(universe)];
+
+  // --- ArtNet output ---
+  if (clientConfig.artnet) {
+    const destIP = route?.artnet?.ip || clientConfig.artnetHost;
+    const destUni = route?.artnet?.universe ?? (universe - 1); // default: 0-indexed
+    if (isValidIP(destIP)) {
+      const packet = buildArtNetPacket(destUni, data);
+      artnetSocket.send(packet, 0, packet.length, ARTNET_PORT, destIP);
+    }
   }
+
+  // --- sACN output ---
   if (clientConfig.sacn) {
-    const packet = buildSACNPacket(universe, data);
-    const multicastAddr = `239.255.${(universe >> 8) & 0xFF}.${universe & 0xFF}`;
+    const sacnUni = route?.sacn?.universe ?? universe; // default: same as Lumina universe
+    const packet = buildSACNPacket(sacnUni, data);
+    const multicastAddr = `239.255.${(sacnUni >> 8) & 0xFF}.${sacnUni & 0xFF}`;
     sacnSocket.send(packet, 0, packet.length, SACN_PORT, multicastAddr);
   }
 }
@@ -461,6 +589,12 @@ wss.on('connection', (ws) => {
           if (outputEnabled) restartOutputLoop();
         }
         console.log('[CONFIG]', clientConfig, 'rate:', outputRate + 'ms');
+      }
+
+      // --- Universe routing config ---
+      if (msg.type === 'universe_routing') {
+        universeRoutingConfig = msg.routing || {};
+        console.log('[ROUTING]', Object.keys(universeRoutingConfig).length, 'custom universe routes');
       }
 
       // --- Input config ---
