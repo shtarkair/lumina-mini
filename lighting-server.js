@@ -5,12 +5,23 @@ const dgram = require('dgram');
 const os = require('os');
 const WebSocket = require('ws');
 const AdmZip = require('adm-zip');
+const crypto = require('crypto');
+const { spawn, execSync } = require('child_process');
 
 const PORT = 3457;
 const ARTNET_PORT = 6454;
 const SACN_PORT = 5568;
 const MAX_UNIVERSES = 64;
 const filePath = path.join(__dirname, 'lighting-app.html');
+
+// --- Software Update ---
+const UPDATE_FILES = [
+  'lighting-app.html',
+  'lighting-server.js',
+  'fixture-library.json',
+  'package.json',
+  'package-lock.json'
+];
 
 // --- Gather local IP addresses (for feedback loop prevention) ---
 const localAddresses = new Set(['127.0.0.1', '::1', '0.0.0.0']);
@@ -394,6 +405,158 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: 'Failed to parse MVR: ' + e.message }));
       }
     });
+    return;
+  }
+
+  // --- Software Update: check GitHub for new commits ---
+  if (req.url === '/api/update-check' && req.method === 'GET') {
+    try {
+      // Fetch latest from GitHub
+      execSync('git fetch origin', { cwd: __dirname, timeout: 15000, stdio: 'pipe' });
+
+      // Get local and remote commit info
+      const localCommit = execSync('git rev-parse HEAD', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+      const remoteCommit = execSync('git rev-parse origin/master', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+
+      // Count commits behind
+      const behindStr = execSync('git rev-list --count HEAD..origin/master', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+      const behind = parseInt(behindStr) || 0;
+
+      // Get list of changed files (only tracked files between HEAD and origin/master)
+      let changedFiles = [];
+      let commitMessages = [];
+      if (behind > 0) {
+        const diffOutput = execSync('git diff --name-only HEAD..origin/master', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+        changedFiles = diffOutput ? diffOutput.split('\n').filter(f => f.trim()) : [];
+        const logOutput = execSync('git log --oneline HEAD..origin/master', { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+        commitMessages = logOutput ? logOutput.split('\n').filter(l => l.trim()) : [];
+      }
+
+      // Get file sizes for display
+      const fileDetails = {};
+      for (const fname of changedFiles) {
+        const fpath = path.join(__dirname, fname);
+        const localSize = fs.existsSync(fpath) ? fs.statSync(fpath).size : 0;
+        // Get remote file size from git
+        let remoteSize = 0;
+        try {
+          const blob = execSync(`git cat-file -s origin/master:${fname}`, { cwd: __dirname, stdio: 'pipe' }).toString().trim();
+          remoteSize = parseInt(blob) || 0;
+        } catch(e) { /* new file, no local version */ }
+        fileDetails[fname] = { localSize, remoteSize };
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: true,
+        branch,
+        localCommit: localCommit.substring(0, 7),
+        remoteCommit: remoteCommit.substring(0, 7),
+        behind,
+        changedFiles,
+        fileDetails,
+        commitMessages
+      }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Git fetch failed: ' + e.message }));
+    }
+    return;
+  }
+
+  // --- Software Update: pull from GitHub + restart ---
+  if (req.url === '/api/apply-update' && req.method === 'POST') {
+    try {
+      // 1. Create backup of core files before pulling
+      const backupDir = path.join(__dirname, 'backups', new Date().toISOString().replace(/[:.]/g, '-'));
+      fs.mkdirSync(backupDir, { recursive: true });
+      for (const fname of UPDATE_FILES) {
+        const src = path.join(__dirname, fname);
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, path.join(backupDir, fname));
+        }
+      }
+      console.log('[UPDATE] Backup created:', backupDir);
+
+      // 2. Check if package.json will change
+      let packageWillChange = false;
+      try {
+        const diff = execSync('git diff --name-only HEAD..origin/master', { cwd: __dirname, stdio: 'pipe' }).toString();
+        packageWillChange = diff.includes('package.json');
+      } catch(e) {}
+
+      // 3. Git pull from origin
+      const pullOutput = execSync('git pull origin master', { cwd: __dirname, timeout: 30000, stdio: 'pipe' }).toString().trim();
+      console.log('[UPDATE] Git pull:', pullOutput);
+
+      // 4. npm install if package.json changed
+      if (packageWillChange) {
+        try {
+          console.log('[UPDATE] Running npm install...');
+          execSync('npm install', { cwd: __dirname, timeout: 30000, stdio: 'pipe' });
+          console.log('[UPDATE] npm install complete');
+        } catch (e) {
+          console.error('[UPDATE] npm install failed:', e.message);
+        }
+      }
+
+      // 5. Send success response
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, pullOutput, backup: backupDir }));
+
+      // 6. Broadcast restart warning then restart
+      setTimeout(() => {
+        broadcastToClients({ type: 'server_restarting' });
+
+        // Write a tiny helper script that waits for port to free, then starts new server
+        const helperPath = path.join(__dirname, '.restart-helper.js');
+        const helperCode = `
+const { spawn } = require('child_process');
+const net = require('net');
+const path = require('path');
+
+function waitForPortFree(port, cb) {
+  const s = net.createServer();
+  s.once('error', () => setTimeout(() => waitForPortFree(port, cb), 500));
+  s.once('listening', () => { s.close(() => cb()); });
+  s.listen(port);
+}
+
+setTimeout(() => {
+  waitForPortFree(${PORT}, () => {
+    const nodePath = process.argv[0] || 'node';
+    const serverPath = path.join(__dirname, 'lighting-server.js');
+    const child = spawn(nodePath, [serverPath], {
+      cwd: __dirname,
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env }
+    });
+    child.unref();
+    console.log('[RESTART HELPER] New server spawned, PID:', child.pid);
+    process.exit(0);
+  });
+}, 1000);
+`;
+        fs.writeFileSync(helperPath, helperCode);
+
+        const child = spawn(process.argv[0], [helperPath], {
+          cwd: __dirname,
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+        console.log('[UPDATE] Restart helper spawned, exiting...');
+
+        setTimeout(() => process.exit(0), 500);
+      }, 300);
+
+    } catch (e) {
+      console.error('[UPDATE] Apply error:', e.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
     return;
   }
 

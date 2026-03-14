@@ -1454,6 +1454,25 @@ function LightingTimeline() {
     Object.values(dmxPatch).forEach(fp => { if (fp.universe) unis.add(fp.universe); });
     return [...unis].sort((a, b) => a - b);
   }, [dmxPatch]);
+
+  // Detect DMX address conflicts (overlapping channel ranges on same universe)
+  const dmxConflicts = useMemo(() => {
+    const conflicts = new Set();
+    const entries = Object.entries(dmxPatch).map(([id, fp]) => {
+      const prof = DMX_PROFILES[fp.profile] || DMX_PROFILES.SPOT;
+      return { id: String(id), uni: fp.universe || 1, start: fp.address || 1, end: (fp.address || 1) + prof.channels - 1 };
+    });
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        const a = entries[i], b = entries[j];
+        if (a.uni === b.uni && a.start <= b.end && b.start <= a.end) {
+          conflicts.add(a.id);
+          conflicts.add(b.id);
+        }
+      }
+    }
+    return conflicts;
+  }, [dmxPatch]);
   useEffect(() => { dmxPatchRef.current = dmxPatch; localStorage.setItem("lumina-dmx-patch", JSON.stringify(dmxPatch)); }, [dmxPatch]);
   useEffect(() => {
     universeRoutingRef.current = universeRouting;
@@ -1471,6 +1490,62 @@ function LightingTimeline() {
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [loadDialogShows, setLoadDialogShows] = useState([]);
   const [loadDialogDir, setLoadDialogDir] = useState('');
+
+  // ─── Lumina Menu ───
+  const [luminaMenuOpen, setLuminaMenuOpen] = useState(false);
+
+  // ─── Software Update (GitHub) ───
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null); // null|'checking'|'ready'|'applying'|'restarting'|'error'
+  const [updateInfo, setUpdateInfo] = useState(null); // { branch, localCommit, remoteCommit, behind, changedFiles, fileDetails, commitMessages }
+  const [updateError, setUpdateError] = useState('');
+  const [updateProgress, setUpdateProgress] = useState('');
+
+  const formatSize = (bytes) => {
+    if (!bytes || bytes === 0) return '—';
+    if (bytes < 1024) return bytes + 'B';
+    if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'K';
+    return (bytes/(1024*1024)).toFixed(1) + 'M';
+  };
+
+  const doUpdateCheck = async () => {
+    setUpdateStatus('checking');
+    setUpdateError('');
+    setUpdateInfo(null);
+    try {
+      const res = await fetch('/api/update-check', { signal: AbortSignal.timeout(20000) });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Check failed');
+      setUpdateInfo(data);
+      setUpdateStatus('ready');
+    } catch (e) {
+      setUpdateError('Check failed: ' + e.message);
+      setUpdateStatus('error');
+    }
+  };
+
+  const doApplyUpdate = async () => {
+    if (!updateInfo || updateInfo.behind === 0) return;
+    setUpdateStatus('applying');
+    setUpdateError('');
+    try {
+      setUpdateProgress('Pulling ' + updateInfo.behind + ' commit' + (updateInfo.behind>1?'s':'') + ' from GitHub...');
+      const res = await fetch('/api/apply-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Apply failed');
+
+      setUpdateStatus('restarting');
+      setUpdateProgress('Server restarting...');
+      // Auto-reconnect is handled by the server_restarting WebSocket message
+    } catch (e) {
+      setUpdateError('Update failed: ' + e.message);
+      setUpdateStatus('error');
+    }
+  };
 
   const doSaveShow = async (name) => {
     setShowName(name);
@@ -1699,6 +1774,29 @@ function LightingTimeline() {
                 setRdmSelected(new Set(msg.devices.map(d => d.uid)));
               }
               setRdmDialogOpen(true); // always show dialog (devices or nodes info)
+            }
+            // Auto-reconnect after server update restart
+            if (msg.type === 'server_restarting') {
+              setUpdateStatus('restarting');
+              setUpdateProgress('Server restarting... waiting for reconnect');
+              let attempts = 0;
+              const pollReconnect = setInterval(async () => {
+                attempts++;
+                if (attempts > 30) { // 30 * 2s = 60s timeout
+                  clearInterval(pollReconnect);
+                  setUpdateError('Server did not come back after 60 seconds');
+                  setUpdateStatus('error');
+                  return;
+                }
+                try {
+                  const r = await fetch('/api/update-check', { signal: AbortSignal.timeout(2000) });
+                  if (r.ok) {
+                    clearInterval(pollReconnect);
+                    setUpdateProgress('Server is back! Reloading...');
+                    setTimeout(() => window.location.reload(), 1000);
+                  }
+                } catch(e) { /* server not up yet */ }
+              }, 2000);
             }
           } catch(e) {}
         };
@@ -2014,9 +2112,18 @@ function LightingTimeline() {
         <button onClick={()=>{if(copyMode){setCopyMode(false);setCopiedCues(null);}else{setCopyMode(true);const sel=selectedCues.size>0?cues.filter(c=>selectedCues.has(c.id)):selectedCue?cues.filter(c=>c.id===selectedCue):[];if(sel.length>0){setCopiedCues(sel.map(c=>({...c,id:null})));}}}} style={{background:copyMode?`linear-gradient(135deg,${copiedCues?"#1a2a3a,#2244668c,#1a2a3a":"#1a3a2a,#22664488,#1a3a2a"})`:"#1e222a",backgroundSize:copyMode?"400% 100%":"auto",border:`1px solid ${copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#2e3340"}`,color:copyMode?(copiedCues?"#44aaff":"#44ffaa"):"#555",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:copyMode?"bold":"normal",animation:copyMode?`${copiedCues?"pasteglow":"copyglow"} 2s ease-in-out infinite, sparkletext 2s ease-in-out infinite, shimmer 3s linear infinite`:"none",letterSpacing:copyMode?2:0,transition:"all 0.3s ease"}}>{"\u2728"} {copyMode?(copiedCues?`PASTE (${copiedCues.length})`:"COPY"):"COPY"}</button>
         <button onClick={handleGlobalUndo} style={{background:undoHistoryRef.current.length?"#2a1e10":"#1e1c16",border:"1px solid "+(undoHistoryRef.current.length?"#cc994466":"#3a3020"),color:undoHistoryRef.current.length?"#cc9944":"#333",borderRadius:4,padding:"3px 10px",cursor:undoHistoryRef.current.length?"pointer":"default",fontSize:11}} title="Undo (Ctrl+Z)">{"\u21B6"} UNDO</button>
         <button onClick={handleDissolve} style={{background:selectedCues.size>=2?"#1a2030":"#1e222a",border:"1px solid "+(selectedCues.size>=2?"#aa88ff66":"#2e3340"),color:selectedCues.size>=2?"#aa88ff":"#333",borderRadius:4,padding:"3px 10px",cursor:selectedCues.size>=2?"pointer":"default",fontSize:11}} title="Smooth dissolve between selected cues">{"\u223F"} DISSOLVE</button>
-        <div style={{width:1,height:22,background:"#3a3020"}}/>
-        <button onClick={handleShowSave} style={{background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Save entire show">{"\uD83D\uDCBE"} SAVE SHOW</button>
-        <button onClick={handleShowLoad} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1}} title="Load show file">{"\uD83D\uDCC2"} LOAD SHOW</button>
+        <div style={{position:"relative"}}>
+          <button onClick={()=>setLuminaMenuOpen(v=>!v)} style={{background:luminaMenuOpen?"#2a2510":"#1e1c16",border:"1px solid "+(luminaMenuOpen?"#cc9944":"#3a3020"),color:"#cc9944",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,fontWeight:"bold"}} title="Lumina Menu">{"\u2728"}</button>
+          {luminaMenuOpen && (<>
+            <div onClick={()=>setLuminaMenuOpen(false)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002}}/>
+            <div style={{position:"absolute",top:"110%",right:0,zIndex:10003,background:"#14161e",border:"1px solid #3a3020",borderRadius:6,padding:6,display:"flex",flexDirection:"column",gap:4,minWidth:170,boxShadow:"0 8px 30px rgba(0,0,0,0.7)"}}>
+              <button onClick={()=>{setLuminaMenuOpen(false);handleShowSave();}} style={{background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"8px 12px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1,textAlign:"left"}}>{"\uD83D\uDCBE"} SAVE SHOW</button>
+              <button onClick={()=>{setLuminaMenuOpen(false);handleShowLoad();}} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"8px 12px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1,textAlign:"left"}}>{"\uD83D\uDCC2"} LOAD SHOW</button>
+              <div style={{height:1,background:"#2e3340",margin:"2px 0"}}/>
+              <button onClick={()=>{setLuminaMenuOpen(false);setUpdateDialogOpen(true);setUpdateStatus(null);setUpdateInfo(null);setUpdateError('');setUpdateProgress('');}} style={{background:"#0c0e12",border:"1px solid #22cc5544",color:"#22cc55",borderRadius:4,padding:"8px 12px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1,textAlign:"left"}}>{"\u21BB"} UPDATE</button>
+            </div>
+          </>)}
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
           <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#cc9944"}}/>
@@ -2316,12 +2423,14 @@ function LightingTimeline() {
                   {fixtures.map(fx => {
                     const p = dmxPatch[fx.id];
                     const prof = p ? DMX_PROFILES[p.profile] : null;
+                    const hasConflict = dmxConflicts.has(String(fx.id));
                     return (
-                      <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:7,color:"#555"}}>
-                        <div style={{width:5,height:5,borderRadius:"50%",background:fx.color}}/>
+                      <div key={fx.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:7,color:hasConflict?"#ff3333":"#555"}}>
+                        <div style={{width:5,height:5,borderRadius:"50%",background:hasConflict?"#ff3333":fx.color}}/>
                         <span style={{width:44,overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
-                        <span style={{color:"#ff884488"}}>U{p?.universe||1} A{p?.address||1}</span>
-                        <span style={{marginLeft:"auto",color:"#333"}}>{prof?prof.channels:0}ch</span>
+                        <span style={{color:hasConflict?"#ff3333":"#ff884488"}}>U{p?.universe||1} A{p?.address||1}</span>
+                        {hasConflict && <span style={{color:"#ff3333",fontSize:7,fontWeight:"bold"}}>{"\u26A0"}</span>}
+                        <span style={{marginLeft:"auto",color:hasConflict?"#ff333388":"#333"}}>{prof?prof.channels:0}ch</span>
                       </div>
                     );
                   })}
@@ -2588,6 +2697,106 @@ function LightingTimeline() {
           </div>
         );
       })()}
+
+      {/* Software Update Dialog */}
+      {updateDialogOpen && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:10002,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{if(updateStatus!=='applying'&&updateStatus!=='restarting')setUpdateDialogOpen(false);}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#0e1018",border:"1px solid #22cc5544",borderRadius:8,width:520,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,0.8)",padding:20,display:"flex",flexDirection:"column",gap:14,overflow:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:12,fontWeight:"bold",color:"#22cc55",letterSpacing:2}}>{"\u21BB"} SOFTWARE UPDATE</span>
+              {updateStatus==='restarting' && <span style={{fontSize:9,color:"#ffaa22",letterSpacing:1,animation:"pulse 1s infinite"}}>{"\u23F3"} RESTARTING...</span>}
+            </div>
+
+            {/* GitHub source + check button */}
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:9,color:"#555",letterSpacing:1}}>SOURCE</span>
+              <span style={{flex:1,fontSize:10,color:"#6e7681",fontFamily:"monospace"}}>github.com / lumina-mini</span>
+              <button onClick={doUpdateCheck} disabled={updateStatus==='checking'||updateStatus==='applying'||updateStatus==='restarting'} style={{padding:"6px 14px",fontSize:10,fontWeight:"bold",letterSpacing:1,background:updateStatus==='checking'?"#0a2a1a":"#0c0e12",border:"1px solid #22cc5566",color:"#22cc55",borderRadius:4,cursor:"pointer",opacity:(updateStatus==='applying'||updateStatus==='restarting')?0.3:1}}>
+                {updateStatus==='checking'?'CHECKING...':'CHECK FOR UPDATES'}
+              </button>
+            </div>
+
+            {/* Error message */}
+            {updateError && (
+              <div style={{background:"#1a0808",border:"1px solid #ff333344",borderRadius:4,padding:"8px 12px",fontSize:10,color:"#ff5544"}}>{updateError}</div>
+            )}
+
+            {/* Version info */}
+            {updateInfo && (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {/* Branch / commit info */}
+                <div style={{display:"flex",gap:16,padding:"6px 10px",background:"#080a0e",borderRadius:4,border:"1px solid #1e222a"}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>BRANCH</span>
+                    <span style={{fontSize:11,color:"#8b949e",fontFamily:"monospace"}}>{updateInfo.branch}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>LOCAL</span>
+                    <span style={{fontSize:11,color:"#8b949e",fontFamily:"monospace"}}>{updateInfo.localCommit}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>REMOTE</span>
+                    <span style={{fontSize:11,color:updateInfo.behind>0?"#22cc55":"#8b949e",fontFamily:"monospace"}}>{updateInfo.remoteCommit}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,marginLeft:"auto"}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>STATUS</span>
+                    <span style={{fontSize:11,color:updateInfo.behind>0?"#ffaa22":"#22cc55",fontWeight:"bold"}}>
+                      {updateInfo.behind > 0 ? updateInfo.behind + ' commit' + (updateInfo.behind>1?'s':'') + ' behind' : 'Up to date'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Commit messages */}
+                {updateInfo.commitMessages && updateInfo.commitMessages.length > 0 && (
+                  <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>NEW COMMITS</span>
+                    {updateInfo.commitMessages.map((msg, i) => (
+                      <div key={i} style={{fontSize:10,color:"#c9d1d9",fontFamily:"monospace",padding:"3px 8px",background:"#0d1117",borderRadius:3,borderLeft:"2px solid #22cc5566"}}>
+                        {msg}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Changed files table */}
+                {updateInfo.changedFiles.length > 0 && (
+                  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:8,color:"#555",letterSpacing:1}}>CHANGED FILES</span>
+                    {updateInfo.changedFiles.map(fname => {
+                      const details = updateInfo.fileDetails[fname] || {};
+                      return (
+                        <div key={fname} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",background:"#0a1a0a",borderRadius:3}}>
+                          <span style={{flex:1,fontSize:10,color:"#22cc55",fontFamily:"monospace"}}>{fname}</span>
+                          <span style={{fontSize:9,color:"#ff884488",fontFamily:"monospace"}}>{formatSize(details.localSize)}</span>
+                          <span style={{fontSize:9,color:"#555"}}>{"\u2192"}</span>
+                          <span style={{fontSize:9,color:"#22cc5588",fontFamily:"monospace"}}>{formatSize(details.remoteSize)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {updateInfo.behind === 0 && (
+                  <div style={{padding:"12px 0",textAlign:"center",fontSize:11,color:"#44ffaa88"}}>{"\u2705"} All files are up to date!</div>
+                )}
+              </div>
+            )}
+
+            {/* Progress message */}
+            {updateProgress && (updateStatus==='applying'||updateStatus==='restarting') && (
+              <div style={{background:"#0a1a2a",border:"1px solid #4488ff44",borderRadius:4,padding:"8px 12px",fontSize:10,color:"#4488ff"}}>{updateProgress}</div>
+            )}
+
+            {/* Action buttons */}
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setUpdateDialogOpen(false)} disabled={updateStatus==='applying'||updateStatus==='restarting'} style={{padding:"6px 16px",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#1e222a",border:"1px solid #2e3340",color:"#555",borderRadius:4,cursor:"pointer",opacity:(updateStatus==='applying'||updateStatus==='restarting')?0.3:1}}>CLOSE</button>
+              {updateInfo && updateInfo.behind > 0 && updateStatus!=='applying' && updateStatus!=='restarting' && (
+                <button onClick={doApplyUpdate} style={{padding:"6px 16px",fontSize:10,fontWeight:"bold",letterSpacing:1,background:"#0a2a1a",border:"1px solid #22cc5566",color:"#22cc55",borderRadius:4,cursor:"pointer"}}>{"\u21BB"} PULL UPDATE ({updateInfo.behind} commit{updateInfo.behind>1?'s':''})</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Save Show Dialog */}
       {saveDialogOpen && (
@@ -2990,7 +3199,7 @@ function LightingTimeline() {
                       </div>
                     </>)}
                   </div>
-                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:(fxPatch.universe||1)+'.'+(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:70,background:"#080a0e",border:"1px solid "+(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_dmx'?"#ff8844":"#ff884444"),color:"#ff8844",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{(fxPatch.universe||1)}.{fxPatch.address||1}</div>
+                  <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:(fxPatch.universe||1)+'.'+(fxPatch.address||1),rect:{top:r.bottom+2,left:r.left}});}} style={{width:70,background:dmxConflicts.has(String(fx.id))?"#1c0808":"#080a0e",border:"1px solid "+(dmxConflicts.has(String(fx.id))?"#ff3333":(keypadState?.fxId===fx.id&&keypadState?.field==='fixture_dmx'?"#ff8844":"#ff884444")),color:dmxConflicts.has(String(fx.id))?"#ff3333":"#ff8844",borderRadius:2,padding:"3px 4px",fontSize:11,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{dmxConflicts.has(String(fx.id))?"\u26A0 ":""}{(fxPatch.universe||1)}.{fxPatch.address||1}</div>
                   <div style={{position:"relative"}}>
                     <div onClick={()=>setKeypadState(prev=>prev?.field==='fixture_color'&&prev.fxId===fx.id?null:{field:'fixture_color',fxId:fx.id})} style={{width:28,height:22,background:fx.color,border:"1px solid "+(keypadState?.field==='fixture_color'&&keypadState?.fxId===fx.id?"#fff":"#1e222a"),borderRadius:2,cursor:"pointer"}}/>
                     {keypadState?.field==='fixture_color'&&keypadState?.fxId===fx.id&&(
@@ -3704,16 +3913,17 @@ function LightingTimeline() {
                 const params = Object.entries(profile.map);
                 const fxUni = p.universe || 1;
                 const fxAddr = p.address || 1;
+                const fxConflict = dmxConflicts.has(String(fx.id));
                 return [
-                  <div key={`${fx.id}-addr`} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0 2px",borderTop:fxIdx>0?"1px solid #2a2e36":"none",marginTop:fxIdx>0?6:0,background:"#12151c",margin:"0 -4px",padding:"5px 4px 3px",borderRadius:3}}>
-                    <div style={{width:20}}/>
+                  <div key={`${fx.id}-addr`} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0 2px",borderTop:fxIdx>0?"1px solid "+(fxConflict?"#ff333344":"#2a2e36"):"none",marginTop:fxIdx>0?6:0,background:fxConflict?"#1c0808":"#12151c",margin:"0 -4px",padding:"5px 4px 3px",borderRadius:3,border:fxConflict?"1px solid #ff333344":"1px solid transparent"}}>
+                    <div style={{width:20}}>{fxConflict && <span style={{fontSize:10,color:"#ff3333"}}>{"\u26A0"}</span>}</div>
                     <div style={{width:80,display:"flex",alignItems:"center",gap:4}}>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:fx.color,flexShrink:0}}/>
-                      <span style={{fontSize:10,color:fx.color,fontWeight:"bold",overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:fxConflict?"#ff3333":fx.color,flexShrink:0}}/>
+                      <span style={{fontSize:10,color:fxConflict?"#ff3333":fx.color,fontWeight:"bold",overflow:"hidden",whiteSpace:"nowrap"}}>{fx.name}</span>
                     </div>
-                    <span style={{fontSize:9,color:"#ff884488",letterSpacing:1,width:80}}>ADDRESS</span>
-                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:fxUni+'.'+fxAddr,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:"#0c1018",border:"1px solid #ff884466",color:"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxUni}.{fxAddr}</div>
-                    <span style={{fontSize:8,color:"#555"}}>{profile.channels}ch</span>
+                    <span style={{fontSize:9,color:fxConflict?"#ff333388":"#ff884488",letterSpacing:1,width:80}}>{fxConflict?"CONFLICT":"ADDRESS"}</span>
+                    <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState({fxId:fx.id,paramId:null,field:'fixture_dmx',value:fxUni+'.'+fxAddr,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:fxConflict?"#1c0808":"#0c1018",border:"1px solid "+(fxConflict?"#ff3333":"#ff884466"),color:fxConflict?"#ff3333":"#ff8844",borderRadius:2,padding:"2px 4px",fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none",fontWeight:"bold"}}>{fxUni}.{fxAddr}</div>
+                    <span style={{fontSize:8,color:fxConflict?"#ff333388":"#555"}}>{profile.channels}ch</span>
                     <span style={{fontSize:8,color:fxAddr+profile.channels-1>512?"#ff3333":"#333",marginLeft:2}}>{fxAddr+profile.channels-1>512?"OVERFLOW":""}</span>
                   </div>,
                   ...params.map(([paramId, profEntry], pIdx) => {
