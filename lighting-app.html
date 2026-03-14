@@ -7,9 +7,12 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #0f1115; }
-    input[type=range] { -webkit-appearance: none; appearance: none; background: #1e222a; border-radius: 4px; outline: none; }
-    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border-radius: 50%; background: #e8aa22; cursor: pointer; border: 2px solid #0f1115; }
-    input[type=range]::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: #1e222a; }
+    input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; border-radius: 4px; outline: none; height: 28px; }
+    input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #1a1e26; border: 1px solid #252930; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff8, #e8aa22 40%, #b8880a); cursor: pointer; border: 2px solid #0f1115; margin-top: -9px; box-shadow: 0 0 10px #e8aa2288, 0 0 20px #e8aa2244, 0 2px 4px rgba(0,0,0,0.5); }
+    @keyframes popIn { 0% { opacity:0; transform:scale(0.85); } 100% { opacity:1; transform:scale(1); } }
+    @keyframes backdropIn { 0% { opacity:0; } 100% { opacity:1; } }
+    @keyframes flyIn { 0% { opacity:0; transform:translate(var(--fly-dx,0px),var(--fly-dy,0px)) scale(0.3); } 40% { opacity:1; transform:translate(calc(var(--fly-dx,0px)*0.1),calc(var(--fly-dy,0px)*0.1)) scale(1.03); } 100% { opacity:1; transform:translate(0,0) scale(1); } }
   </style>
 </head>
 <body>
@@ -19,6 +22,52 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="text/babel">
 const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+function GlowSlider({min=0,max=100,step=1,value,onChange,color="#e8aa22",style={},ticks=10}){
+  const trackRef=useRef(null);
+  const zoomRef=useRef(null);
+  const [zoomed,setZoomed]=useState(false);
+  const longPressRef=useRef(null);
+  const activeRef=useRef(false);
+  const pct=Math.max(0,Math.min(100,((value-min)/(max-min))*100));
+  const clamp=(v)=>{const r=Math.round(Math.max(min,Math.min(max,v))/step)*step;return Math.round(r*1000)/1000;};
+  const update=(e)=>{const el=(zoomed&&zoomRef.current)?zoomRef.current:trackRef.current;if(!el)return;const r=el.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));onChange(clamp(min+x*(max-min)));};
+  const startLongPress=()=>{longPressRef.current=setTimeout(()=>{if(activeRef.current)setZoomed(true);},400);};
+  const cancelLongPress=()=>{if(longPressRef.current){clearTimeout(longPressRef.current);longPressRef.current=null;}};
+  const onDown=(e)=>{e.preventDefault();activeRef.current=true;startLongPress();update(e);
+    const mv=(ev)=>{cancelLongPress();update(ev);};const up=()=>{cancelLongPress();activeRef.current=false;setZoomed(false);window.removeEventListener("mousemove",mv);window.removeEventListener("mouseup",up);};
+    window.addEventListener("mousemove",mv);window.addEventListener("mouseup",up);};
+  const onTouch=(e)=>{e.preventDefault();activeRef.current=true;const t=e.touches[0];startLongPress();update(t);
+    const mv=(ev)=>{ev.preventDefault();cancelLongPress();update(ev.touches[0]);};const up=()=>{cancelLongPress();activeRef.current=false;setZoomed(false);trackRef.current?.removeEventListener("touchmove",mv);trackRef.current?.removeEventListener("touchend",up);};
+    trackRef.current.addEventListener("touchmove",mv,{passive:false});trackRef.current.addEventListener("touchend",up);};
+  const renderScale=(tk,h)=>{const marks=[];for(let i=0;i<=tk;i++){const p=(i/tk)*100;const maj=i===0||i===tk||i===Math.round(tk/2);marks.push({pct:p,major:maj});}
+    return <><div style={{position:"absolute",left:0,right:0,top:h,height:1,background:"#3a3f4c"}}/>
+      {marks.map((m,i)=><div key={i} style={{position:"absolute",left:`${m.pct}%`,top:m.major?h-8:h-4,width:1,height:m.major?8:4,background:m.major?"#666":"#333"}}/>)}
+      <div style={{position:"absolute",left:`${pct}%`,top:0,transform:"translateX(-50%)",display:"flex",flexDirection:"column",alignItems:"center",pointerEvents:"none"}}>
+        <div style={{width:0,height:0,borderLeft:"7px solid transparent",borderRight:"7px solid transparent",borderTop:`12px solid ${color}`,filter:`drop-shadow(0 0 4px ${color}88)`}}/>
+        <div style={{width:2,height:Math.max(2,h-13),background:color,marginTop:-1,boxShadow:`0 0 4px ${color}66`}}/>
+      </div></>};
+  return <><div ref={trackRef} onMouseDown={onDown} onTouchStart={onTouch} style={{position:"relative",height:32,cursor:"pointer",touchAction:"none",...style}}>
+    {renderScale(ticks,20)}
+  </div>
+  {zoomed&&(()=>{const r=trackRef.current?.getBoundingClientRect();if(!r)return null;
+    const W=Math.min(window.innerWidth-16,r.width*3);
+    const L=Math.max(8,Math.min(r.left-(W-r.width)/2,window.innerWidth-W-8));
+    return <div ref={zoomRef} onMouseDown={e=>{e.preventDefault();e.stopPropagation();const el=zoomRef.current;const rect=el.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));onChange(clamp(min+x*(max-min)));
+      const mv2=(ev)=>{const rect2=el.getBoundingClientRect();const x2=Math.max(0,Math.min(1,(ev.clientX-rect2.left)/rect2.width));onChange(clamp(min+x2*(max-min)));};
+      const up2=()=>{setZoomed(false);activeRef.current=false;window.removeEventListener("mousemove",mv2);window.removeEventListener("mouseup",up2);};
+      window.addEventListener("mousemove",mv2);window.addEventListener("mouseup",up2);
+    }} onTouchStart={e=>{e.preventDefault();e.stopPropagation();const el=zoomRef.current;const t=e.touches[0];const rect=el.getBoundingClientRect();const x=Math.max(0,Math.min(1,(t.clientX-rect.left)/rect.width));onChange(clamp(min+x*(max-min)));
+      const mv2=(ev)=>{ev.preventDefault();const t2=ev.touches[0];const rect2=el.getBoundingClientRect();const x2=Math.max(0,Math.min(1,(t2.clientX-rect2.left)/rect2.width));onChange(clamp(min+x2*(max-min)));};
+      const up2=()=>{setZoomed(false);activeRef.current=false;el.removeEventListener("touchmove",mv2);el.removeEventListener("touchend",up2);};
+      el.addEventListener("touchmove",mv2,{passive:false});el.addEventListener("touchend",up2);
+    }} style={{position:"fixed",left:L,top:r.top-52,width:W,height:50,zIndex:10004,background:"#0c0e12f0",border:`1px solid ${color}44`,borderRadius:8,boxShadow:`0 4px 30px rgba(0,0,0,0.8), 0 0 15px ${color}22`,cursor:"pointer",touchAction:"none",padding:"6px 0",animation:"popIn 0.12s ease-out"}}>
+      <div style={{position:"relative",width:"100%",height:"100%"}}>
+        {renderScale(ticks*3,32)}
+      </div>
+    </div>;
+  })()}</>;
+}
 
 const EASINGS = {
   step:   { label:"STEP",     icon:"\u23F9", fn: t => t < 1 ? 0 : 1 },
@@ -281,6 +330,8 @@ const EFFECT_TYPES = [
   { id:"random", label:"Random", icon:"\u2684", desc:"Random values per beat" },
   { id:"fan", label:"Fan", icon:"\u2261", desc:"Spread values across fixtures" },
   { id:"ballyhoo", label:"Ballyhoo", icon:"\u27F3", desc:"Circular pan+tilt motion" },
+  { id:"flyTilt", label:"Fly Tilt", icon:"\u2B06", desc:"Dim+tilt fly in/out" },
+  { id:"flyPan", label:"Fly Pan", icon:"\u2B05", desc:"Dim+pan fly in/out" },
 ];
 
 function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfade, rangeMin, rangeMax, easing, startBeat, endBeat }) {
@@ -375,6 +426,23 @@ function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfad
       const val = n > 1 ? Math.round(lo + (hi - lo) * fi / (n - 1)) : Math.round((lo + hi) / 2);
       cues.push({ id:genId(), batchId, fixtureId:fx.id, param:paramId, beat:startBeat, duration:dur, value:val, easing:"linear", fadeIn:0, fadeOut:0, startValue:val, endValue:val });
     });
+  } else if (effectType === "flyTilt" || effectType === "flyPan") {
+    const movParam = effectType === "flyTilt" ? getParam("tilt") : getParam("pan");
+    const dimParam = getParam("dimmer");
+    const movParamId = effectType === "flyTilt" ? "tilt" : "pan";
+    const movMid = (movParam.min + movParam.max) / 2;
+    const movRange = (movParam.max - movParam.min) * 0.4;
+    const movStart = movMid + movRange;
+    const movEnd = movMid;
+    fixtures.forEach((fx, fi) => {
+      const delay = spread * (fi / Math.max(1, n - 1)) * dur;
+      const cDur = Math.max(0.5, dur - delay);
+      const b = startBeat + delay;
+      if (b + cDur <= endBeat + 0.01) {
+        cues.push({ id:genId(), batchId, fixtureId:fx.id, param:"dimmer", beat:b, duration:cDur, value:dimParam.max, easing:easing||"easeOut", fadeIn:0, fadeOut:0, startValue:dimParam.min, endValue:dimParam.max });
+        cues.push({ id:genId(), batchId, fixtureId:fx.id, param:movParamId, beat:b, duration:cDur, value:Math.round(movEnd), easing:easing||"easeOut", fadeIn:0, fadeOut:0, startValue:Math.round(movStart), endValue:Math.round(movEnd) });
+      }
+    });
   } else if (effectType === "ballyhoo") {
     const cycleLen = speed;
     const steps = 8;
@@ -437,7 +505,8 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
     setLastBatchId(null);
   };
 
-  const isBallyhoo = effectType === "ballyhoo";
+  const isMultiParam = effectType === "ballyhoo" || effectType === "flyTilt" || effectType === "flyPan";
+  const isBallyhoo = isMultiParam;
 
   const previewData = useMemo(() => {
     let fxList = fixtures.filter(f => selFixtures.has(f.id));
@@ -450,40 +519,27 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
     const dur = fxEnd - fxStart;
     const samples = 200;
 
-    if (isBallyhoo) {
-      // Ballyhoo generates both pan and tilt cues — show both as separate line sets
-      const panParam = getParam("pan"), tiltParam = getParam("tilt");
-      const panCues = {}, tiltCues = {};
-      previewCues.forEach(c => {
-        if (c.param === "pan") (panCues[c.fixtureId] = panCues[c.fixtureId] || []).push(c);
-        else if (c.param === "tilt") (tiltCues[c.fixtureId] = tiltCues[c.fixtureId] || []).push(c);
-      });
+    if (isMultiParam) {
+      // Multi-param effects: group cues by param, show each as a line
+      const paramIds = [...new Set(previewCues.map(c=>c.param))];
+      const cuesByParam = {};
+      previewCues.forEach(c => { (cuesByParam[c.param] = cuesByParam[c.param] || {}); (cuesByParam[c.param][c.fixtureId] = cuesByParam[c.param][c.fixtureId] || []).push(c); });
       const lines = [];
       fxList.forEach(fx => {
-        // Pan line (solid)
-        const pCues = panCues[fx.id] || [];
-        const panRange = panParam.max - panParam.min;
-        const panPts = [];
-        for (let i = 0; i <= samples; i++) {
-          const beat = fxStart + (i / samples) * dur;
-          let val = panParam.min;
-          for (const c of pCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
-          const norm = panRange > 0 ? (val - panParam.min) / panRange : 0;
-          panPts.push({ x: i / samples, y: 1 - norm });
-        }
-        lines.push({ fixtureId: fx.id, color: fx.color, name: fx.name + " Pan", points: panPts, dash: false });
-        // Tilt line (dashed)
-        const tCues = tiltCues[fx.id] || [];
-        const tiltRange = tiltParam.max - tiltParam.min;
-        const tiltPts = [];
-        for (let i = 0; i <= samples; i++) {
-          const beat = fxStart + (i / samples) * dur;
-          let val = tiltParam.min;
-          for (const c of tCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
-          const norm = tiltRange > 0 ? (val - tiltParam.min) / tiltRange : 0;
-          tiltPts.push({ x: i / samples, y: 1 - norm });
-        }
-        lines.push({ fixtureId: fx.id + "_tilt", color: fx.color, name: fx.name + " Tilt", points: tiltPts, dash: true });
+        paramIds.forEach((pid,pi) => {
+          const p = getParam(pid);
+          const fxCues = (cuesByParam[pid] || {})[fx.id] || [];
+          const pRange = p.max - p.min;
+          const pts = [];
+          for (let i = 0; i <= samples; i++) {
+            const beat = fxStart + (i / samples) * dur;
+            let val = p.min;
+            for (const c of fxCues) { if (beat >= c.beat && beat <= c.beat + c.duration) { val = interpolateCue(c, beat); break; } }
+            const norm = pRange > 0 ? (val - p.min) / pRange : 0;
+            pts.push({ x: i / samples, y: 1 - norm });
+          }
+          lines.push({ fixtureId: fx.id + "_" + pid, color: pi === 0 ? fx.color : p.color, name: fx.name + " " + p.label, points: pts, dash: pi > 0 });
+        });
       });
       return lines;
     }
@@ -521,12 +577,14 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
           const PW=300,PAD=8;
           const px=Math.max(PAD,Math.min(fxPickerPos.x-PW/2,window.innerWidth-PW-PAD));
           const py=Math.max(PAD,Math.min(fxPickerPos.y+10,window.innerHeight-500-PAD));
+          const flyDx=fxPickerPos.x-px-PW/2;
+          const flyDy=fxPickerPos.y-py;
           const types=[...new Set(fixtures.map(f=>f.type))];
           const colors=[...new Set(fixtures.map(f=>f.color))];
           const positions=[...new Set(fixtures.map(f=>f.position||"FRONT 1"))];
           const btnS=(sel,col)=>({minHeight:44,background:sel?col+"22":"#0c0e12",border:`1px solid ${sel?col:"#252930"}`,color:sel?col:"#555",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:6,touchAction:"manipulation"});
-          return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002}} onClick={()=>setFxPickerOpen(false)}>
-            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:10003,background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:8,padding:10,boxShadow:"0 6px 30px rgba(0,0,0,0.8)",width:PW,maxHeight:"80vh",overflowY:"auto"}}>
+          return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002,animation:"backdropIn 0.2s ease-out"}} onClick={()=>setFxPickerOpen(false)}>
+            <div onClick={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:10003,background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:8,padding:10,boxShadow:"0 6px 30px rgba(0,0,0,0.8)",width:PW,maxHeight:"80vh",overflowY:"auto","--fly-dx":`${flyDx}px`,"--fly-dy":`${flyDy}px`,animation:"flyIn 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:6,marginBottom:6}}>
                 <span style={{fontSize:11,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>SELECT FIXTURES</span>
                 <button onClick={()=>setFxPickerOpen(false)} style={{background:"#1c1016",border:"1px solid #ff444444",color:"#ff6666",cursor:"pointer",fontSize:14,padding:"4px 10px",borderRadius:4,fontWeight:"bold",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}>{"\u2715"}</button>
@@ -583,14 +641,14 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
               <span style={{fontSize:10,color:"#555"}}>SPEED (beats/cycle)</span>
               <span style={{fontSize:13,color:"#e8aa22",fontWeight:"bold",marginLeft:"auto"}}>{speed}</span>
             </div>
-            <input type="range" min={0.25} max={32} step={0.25} value={speed} onChange={e=>setSpeed(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22",marginTop:4,height:28}}/>
+            <GlowSlider min={0.25} max={32} step={0.25} value={speed} onChange={setSpeed} color="#e8aa22" style={{marginTop:4}}/>
             <div style={{display:"flex",gap:4,marginTop:4}}>
               {[0.5,1,2,4,8,16].map(v => <button key={v} onClick={()=>setSpeed(v)} style={{flex:1,minHeight:36,fontSize:12,fontWeight:"bold",background:speed===v?"#e8aa2233":"#0c0e12",border:`1px solid ${speed===v?"#e8aa22":"#252930"}`,color:speed===v?"#e8aa22":"#555",borderRadius:4,cursor:"pointer"}}>{v}</button>)}
             </div>
           </div>
           <div>
             <span style={{fontSize:10,color:"#555"}}>SPREAD ({offset}% {"\u00B7"} {selFixtures.size}fx)</span>
-            <input type="range" min={0} max={100} value={offset} onChange={e=>setOffset(+e.target.value)} style={{width:"100%",accentColor:"#e8aa22",height:28,marginTop:4}}/>
+            <GlowSlider min={0} max={100} value={offset} onChange={setOffset} color="#e8aa22" style={{marginTop:4}}/>
           </div>
           <div>
             <span style={{fontSize:10,color:"#555"}}>DIRECTION</span>
@@ -602,7 +660,7 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
           </div>
           {(effectType==="chase"||effectType==="rampUp"||effectType==="rampDown")&&<div>
             <span style={{fontSize:10,color:"#555"}}>CROSSFADE ({crossfade}%)</span>
-            <input type="range" min={0} max={100} value={crossfade} onChange={e=>setCrossfade(+e.target.value)} style={{width:"100%",accentColor:"#44ffaa",height:28,marginTop:4}}/>
+            <GlowSlider min={0} max={100} value={crossfade} onChange={setCrossfade} color="#44ffaa" style={{marginTop:4}}/>
           </div>}
           {!isBallyhoo && <div>
             <span style={{fontSize:10,color:"#555"}}>EASING</span>
@@ -2095,7 +2153,7 @@ function LightingTimeline() {
     <div style={{width:"100%",height:"100vh",background:"#141820",display:"flex",flexDirection:"column",fontFamily:"'Courier New',monospace",color:"#c0c6d0",overflow:"hidden",userSelect:"none"}}>
 
       {loopFlash&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(232,170,34,0.08)",pointerEvents:"none",zIndex:999,animation:"loopflash 0.25s ease-out forwards"}}/>}
-      {selectedCues.size>0&&(()=>{const PW=280,PH=580,PAD=8;const px=popupPos?Math.max(PAD,Math.min(popupPos.x-PW/2,window.innerWidth-PW-PAD)):Math.round((window.innerWidth-PW)/2);const py=popupPos?Math.max(PAD,Math.min(popupPos.y-PH-20,window.innerHeight-PH-PAD)):window.innerHeight-PH-PAD;return <div onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:9999,pointerEvents:"auto",touchAction:"none"}}>
+      {selectedCues.size>0&&(()=>{const PW=280,PH=580,PAD=8;const px=popupPos?Math.max(PAD,Math.min(popupPos.x-PW/2,window.innerWidth-PW-PAD)):Math.round((window.innerWidth-PW)/2);const py=popupPos?Math.max(PAD,Math.min(popupPos.y-PH-20,window.innerHeight-PH-PAD)):window.innerHeight-PH-PAD;const flyDx2=popupPos?(popupPos.x-px-PW/2):0;const flyDy2=popupPos?(popupPos.y-py):0;return <div onMouseDown={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",left:px,top:py,zIndex:9999,pointerEvents:"auto",touchAction:"none","--fly-dx":`${flyDx2}px`,"--fly-dy":`${flyDy2}px`,animation:"flyIn 0.25s cubic-bezier(0.16,1,0.3,1)"}}>
         <div style={{background:"#0a0c10f0",border:"1px solid #e8aa2244",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:7,boxShadow:"0 6px 30px rgba(0,0,0,0.7)",width:PW}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #1e2230",paddingBottom:5}}>
             <span style={{fontSize:12,color:"#e8aa22",fontWeight:"bold",letterSpacing:1}}>{selectedCues.size} SELECTED</span>
@@ -2178,8 +2236,8 @@ function LightingTimeline() {
         <div style={{position:"relative"}}>
           <button onClick={()=>setLuminaMenuOpen(v=>!v)} style={{background:luminaMenuOpen?"#2a2510":"#1e1c16",border:"1px solid "+(luminaMenuOpen?"#cc9944":"#3a3020"),color:"#cc9944",borderRadius:4,padding:"3px 10px",cursor:"pointer",fontSize:13,fontWeight:"bold"}} title="Lumina Menu">{"\u2728"}</button>
           {luminaMenuOpen && (<>
-            <div onClick={()=>setLuminaMenuOpen(false)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002}}/>
-            <div style={{position:"absolute",top:"110%",right:0,zIndex:10003,background:"#14161e",border:"1px solid #3a3020",borderRadius:6,padding:6,display:"flex",flexDirection:"column",gap:4,minWidth:170,boxShadow:"0 8px 30px rgba(0,0,0,0.7)"}}>
+            <div onClick={()=>setLuminaMenuOpen(false)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10002,animation:"backdropIn 0.15s ease-out"}}/>
+            <div style={{position:"absolute",top:"110%",right:0,zIndex:10003,background:"#14161e",border:"1px solid #3a3020",borderRadius:6,padding:6,display:"flex",flexDirection:"column",gap:4,minWidth:170,boxShadow:"0 8px 30px rgba(0,0,0,0.7)",animation:"popIn 0.15s ease-out"}}>
               <button onClick={()=>{setLuminaMenuOpen(false);handleShowSave();}} style={{background:"#0a1a0a",border:"1px solid #44ffaa44",color:"#44ffaa",borderRadius:4,padding:"8px 12px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1,textAlign:"left"}}>{"\uD83D\uDCBE"} SAVE SHOW</button>
               <button onClick={()=>{setLuminaMenuOpen(false);handleShowLoad();}} style={{background:"#0a0a1a",border:"1px solid #4488ff44",color:"#4488ff",borderRadius:4,padding:"8px 12px",cursor:"pointer",fontSize:10,fontWeight:"bold",letterSpacing:1,textAlign:"left"}}>{"\uD83D\uDCC2"} LOAD SHOW</button>
               <div style={{height:1,background:"#2e3340",margin:"2px 0"}}/>
@@ -2352,7 +2410,7 @@ function LightingTimeline() {
                     <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2}}>
                       <span style={{fontSize:8,color:"#3a3f4c",letterSpacing:1}}>{row.label}</span>
                       <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #1e3a1e",color:"#44cc44",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
-                      <input type="range" min={row.min} max={row.max} step={row.step} value={row.val} onChange={e=>updateCue(row.key,+e.target.value)} style={{width:"100%",accentColor:selParam.color}}/>
+                      <GlowSlider min={row.min} max={row.max} step={row.step} value={row.val} onChange={v=>updateCue(row.key,v)} color={selParam.color}/>
                     </div>
                   ))}
                   <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
@@ -2360,7 +2418,7 @@ function LightingTimeline() {
                     {[{label:"FADE IN",key:"fadeIn",val:selCue.fadeIn??0},{label:"FADE OUT",key:"fadeOut",val:selCue.fadeOut??0}].map(row=>(
                       <div key={row.key} style={{display:"flex",flexDirection:"column",gap:2,marginBottom:6}}>
                         <span style={{fontSize:8,color:"#3a3f4c"}}>{row.label}</span>
-                        <input type="range" min={0} max={1} step={0.01} value={row.val} onChange={e=>updateCue(row.key,+e.target.value)} style={{width:"100%",accentColor:"#ffaa44"}}/>
+                        <GlowSlider min={0} max={1} step={0.01} value={row.val} onChange={v=>updateCue(row.key,v)} color="#ffaa44"/>
                         <span style={{fontSize:9,color:"#ffaa44",textAlign:"right"}}>{Math.round(row.val*100)}%</span>
                       </div>
                     ))}
