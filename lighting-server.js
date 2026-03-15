@@ -1455,8 +1455,8 @@ wss.on('connection', (ws) => {
 
       // --- DMX frame (sparse overrides from client) ---
       if (msg.type === 'dmx_frame') {
-        if (inputConfig.enabled && msg.overrides) {
-          // Input mode: sparse overrides — only active cue channels
+        if (inputConfig.enabled && clientConfig.dmxMode !== 'source' && msg.overrides) {
+          // Insert mode with input: sparse overrides — only active cue channels
           for (const [uniStr, channels] of Object.entries(msg.overrides)) {
             const uni = parseInt(uniStr);
             if (uni < 1 || uni > MAX_UNIVERSES) continue;

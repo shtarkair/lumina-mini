@@ -1942,11 +1942,17 @@ function LightingTimeline() {
   useEffect(() => {
     if (!outputConfig.enabled) return;
     const useInput = outputConfig.inputEnabled;
+    const mode = outputConfig.dmxMode;
     const iv = setInterval(() => {
       const ws = outputWsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (useInput) {
-        // Input mode: send sparse overrides (only active cue channels)
+      if (mode === "source") {
+        // Source mode: send full timeline data to console
+        const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
+        if (Object.keys(universes).length === 0) return;
+        ws.send(JSON.stringify({ type:"dmx_frame", universes }));
+      } else if (useInput) {
+        // Insert mode with input: send sparse overrides (only active cue channels)
         const overrides = buildDMXOverrides(liveValuesRef.current, dmxPatchRef.current);
         ws.send(JSON.stringify({ type:"dmx_frame", overrides }));
       } else {
@@ -1957,7 +1963,7 @@ function LightingTimeline() {
       }
     }, outputConfig.dmxRate);
     return () => clearInterval(iv);
-  }, [outputConfig.enabled, outputConfig.dmxRate, outputConfig.inputEnabled]);
+  }, [outputConfig.enabled, outputConfig.dmxRate, outputConfig.inputEnabled, outputConfig.dmxMode]);
 
   const {rows, totalH} = useMemo(() => {
     const rows=[];
@@ -2434,7 +2440,7 @@ function LightingTimeline() {
                       <input type="number" value={row.val} min={row.min} max={row.max} step={row.step} onChange={e=>updateCue(row.key,+e.target.value)} style={{background:"#0c0e12",border:"1px solid #1e3a1e",color:"#44cc44",borderRadius:3,padding:"3px 7px",fontSize:11,width:"100%"}}/>
                       <GlowSlider min={row.min} max={row.max} step={row.step} value={row.val} onChange={v=>updateCue(row.key,v)} color={selParam.color}/>
                     </div>
-                  );})}
+                  ))}
                   <div style={{borderTop:"1px solid #1e222a",paddingTop:6}}>
                     <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:6}}>FADE TIMES</div>
                     {[{label:"FADE IN",key:"fadeIn",val:selCue.fadeIn??0},{label:"FADE OUT",key:"fadeOut",val:selCue.fadeOut??0}].map(row=>(
