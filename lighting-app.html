@@ -129,6 +129,15 @@ const PARAM_GROUPS = [
 const ALL_PARAMS = PARAM_GROUPS.flatMap(g => g.params);
 const getParam = id => ALL_PARAMS.find(p => p.id === id) || ALL_PARAMS[0];
 
+// Remove existing cues that overlap with new cues (same fixture+param+beat range)
+const overwriteCues = (existing, incoming) => {
+  const checks = incoming.map(c => ({ fid: c.fixtureId, p: c.param, s: c.beat, e: c.beat + c.duration }));
+  return existing.filter(c => {
+    const cs = c.beat, ce = c.beat + c.duration;
+    return !checks.some(n => n.fid === c.fixtureId && n.p === c.param && cs < n.e && ce > n.s);
+  });
+};
+
 const TYPE_COLORS = { SPOT:"#ff5544", WASH:"#44aaff", STROBE:"#ffdd44", LED:"#aa44ff", FX:"#44ffaa", DIM:"#cccccc", ROBE_MP:"#ff8800", ROBE_MP2:"#ff6600", MAC_VIPER:"#22ccaa", MAC_VIPER2:"#11aa88" };
 const FIXTURE_POSITIONS = ["FRONT 1","FRONT 2","TOP","TOP BACK","BACK","FLOOR","SIDE","CUSTOM"];
 const POSITION_COLORS = {"FRONT 1":"#ff8844","FRONT 2":"#ffaa44","TOP":"#44aaff","TOP BACK":"#4466ff","BACK":"#aa44ff","FLOOR":"#44ffaa","SIDE":"#ffdd44","CUSTOM":"#888888"};
@@ -470,7 +479,7 @@ function generateEffect({ effectType, fixtures, paramId, speed, offset, crossfad
   return cues;
 }
 
-const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups }) {
+const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues, loopStart, loopEnd, fxStart, fxEnd, setExpandedFixtures, setExpandedGroups, cueOverwrite }) {
   const [selFixtures, setSelFixtures] = useState(() => new Set(fixtures.slice(0,4).map(f=>f.id)));
   const [paramId, setParamId] = useState("dimmer");
   const [effectType, setEffectType] = useState("chase");
@@ -487,6 +496,8 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
   const selNone = () => setSelFixtures(new Set());
   const [fxPickerOpen, setFxPickerOpen] = useState(false);
   const [fxPickerPos, setFxPickerPos] = useState({x:0,y:0});
+  const [paramPickerOpen, setParamPickerOpen] = useState(false);
+  const [paramPickerRect, setParamPickerRect] = useState(null);
 
   const handleApply = () => {
     let fxList = fixtures.filter(f => selFixtures.has(f.id));
@@ -495,7 +506,7 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
     if (newCues.length === 0) return;
     const bid = newCues[0].batchId;
     setLastBatchId(bid);
-    setCues(prev => [...prev, ...newCues]);
+    setCues(prev => [...(cueOverwrite ? overwriteCues(prev, newCues) : prev), ...newCues]);
     setExpandedFixtures(new Set(fxList.map(f => f.id)));
     const groupName = PARAM_GROUPS.find(g => g.params.some(p => p.id === paramId))?.group;
     if (groupName) setExpandedGroups(new Set(fxList.map(f => `${f.id}-${groupName}`)));
@@ -616,22 +627,34 @@ const EffectGenerator = React.memo(function EffectGenerator({ fixtures, setCues,
         })()}
       </div>
 
-      {!isBallyhoo && <div>
+      {!isBallyhoo && <div style={{position:"relative"}}>
         <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>PARAMETER</div>
-        <select value={paramId} onChange={e=>setParamId(e.target.value)} style={{width:"100%",background:"#0c0e12",border:"1px solid #252930",color:"#e8aa22",borderRadius:3,padding:"3px 5px",fontSize:10}}>
-          {PARAM_GROUPS.map(g => <optgroup key={g.group} label={g.group}>{g.params.map(p => <option key={p.id} value={p.id}>{p.label} ({p.unit})</option>)}</optgroup>)}
-        </select>
+        <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setParamPickerRect({top:r.bottom+2,left:r.left});setParamPickerOpen(v=>!v);}} style={{width:"100%",background:"#0c0e12",border:"1px solid "+(paramPickerOpen?"#e8aa22":"#252930"),color:"#e8aa22",borderRadius:3,padding:"3px 5px",fontSize:10,cursor:"pointer",userSelect:"none"}}>{(ALL_PARAMS.find(p=>p.id===paramId)||{}).label||paramId} ({(ALL_PARAMS.find(p=>p.id===paramId)||{}).unit||""})</div>
+        {paramPickerOpen&&paramPickerRect&&<div>
+          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setParamPickerOpen(false)}/>
+          <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",bottom:8,left:Math.max(8,Math.min(paramPickerRect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:300,display:"flex",flexDirection:"column",gap:3}}>
+            {PARAM_GROUPS.map(g=><React.Fragment key={g.group}>
+              <div style={{fontSize:8,color:g.color+"88",letterSpacing:2,padding:"6px 10px 2px"}}>{g.group}</div>
+              {g.params.map(p=>{const isSel=paramId===p.id;return(
+                <div key={p.id} onClick={()=>{setParamId(p.id);setParamPickerOpen(false);}} style={{padding:"10px 10px",fontSize:13,color:isSel?p.color:"#ccc",background:isSel?p.color+"18":"transparent",borderRadius:5,display:"flex",alignItems:"center",gap:8,minHeight:44,touchAction:"manipulation",cursor:"pointer"}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?p.color+"18":"transparent";}}>
+                  <span style={{flex:1}}>{p.label}</span>
+                  <span style={{fontSize:10,color:"#666"}}>{p.unit}</span>
+                </div>
+              );})}
+            </React.Fragment>)}
+          </div>
+        </div>}
       </div>}
 
       <div>
         <div style={{fontSize:8,color:"#3a3f4c",letterSpacing:2,marginBottom:4}}>EFFECT</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-          {EFFECT_TYPES.map(et => (
-            <button key={et.id} onClick={()=>setEffectType(et.id)} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"8px 6px",background:effectType===et.id?"#e8aa2218":"#0c0e12",border:`1px solid ${effectType===et.id?"#e8aa22":"#1e222a"}`,color:effectType===et.id?"#e8aa22":"#666",borderRadius:5,cursor:"pointer",textAlign:"center",minHeight:44,touchAction:"manipulation",fontWeight:effectType===et.id?"bold":"normal",fontSize:13}}>
+          {EFFECT_TYPES.map(et => {const sel=effectType===et.id;const col="#e8aa22";return(
+            <button key={et.id} onClick={()=>setEffectType(et.id)} style={{minHeight:44,background:sel?col+"33":"#0c0e12",border:`2px solid ${sel?col:"#252930"}`,color:sel?col:"#555",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:6,touchAction:"manipulation",boxShadow:sel?`0 0 10px ${col}44, inset 0 0 8px ${col}22`:"none",textShadow:sel?`0 0 6px ${col}66`:"none"}}>
               <span style={{fontSize:14}}>{et.icon}</span>
               <span>{et.label}</span>
             </button>
-          ))}
+          );})}
         </div>
       </div>
 
@@ -719,7 +742,7 @@ const SEQ_CATS = PARAM_GROUPS.map(g=>({
   color:g.color
 }));
 
-const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes, bpm }) {
+const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures, setFixtures, setDmxPatch, sequenceStorage, setSequenceStorage, seqCategory, setSeqCategory, seqStoreMode, setSeqStoreMode, seqClearMode, setSeqClearMode, seqRecallMode, setSeqRecallMode, seqFadeBeats, setSeqFadeBeats, cues, selectedCues, setCues, lastRecalledBatchId, setLastRecalledBatchId, liveValues, playhead, mutedLanes, setMutedLanes, bpm, cueOverwrite }) {
   const cat = SEQ_CATS.find(c=>c.id===seqCategory)||SEQ_CATS[0];
   const slots = sequenceStorage[seqCategory]||[];
   const fileInputRef = useRef(null);
@@ -797,7 +820,7 @@ const SequenceStoragePanel = React.memo(function SequenceStoragePanel({ fixtures
         });
       }
       if(seqRecallMode==="replace") setCues([...recalled, ...xfadeCues]);
-      else setCues(prev=>[...prev,...recalled, ...xfadeCues]);
+      else { const all=[...recalled,...xfadeCues]; setCues(prev=>[...(cueOverwrite ? overwriteCues(prev, all) : prev), ...all]); }
       setLastRecalledBatchId(bid);
     }
   };
@@ -890,7 +913,7 @@ const defaultCues = [
   {id:genId(),fixtureId:6,param:"yellow",beat:4,duration:8,value:100,easing:"bounce",fadeIn:0.4,fadeOut:0,startValue:0,endValue:0},
 ];
 
-const FixturePadBar = React.memo(function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect }) {
+const FixturePadBar = React.memo(function FixturePadBar({ fixtures, cues, setCues, playhead, playheadRef, beatEventRef, audioMode, onParamSelect, cueOverwrite, setCueOverwrite }) {
   const [activeParam, setActiveParam] = useState("dimmer");
   const [mode, setMode] = useState(null);
   const [heldPads, setHeldPads] = useState(new Set());
@@ -966,7 +989,8 @@ const FixturePadBar = React.memo(function FixturePadBar({ fixtures, cues, setCue
         fixtures.forEach(fx => {
           if (heldPads.has(fx.id)) {
             const val = padValues[fx.id] ?? Math.round((param.min+param.max)/2);
-            setCues(prev => [...prev, {id:genId(),fixtureId:fx.id,param:activeParam,beat:evt.beat,duration:0.5,value:val,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:param.min,endValue:param.min}]);
+            const nc={id:genId(),fixtureId:fx.id,param:activeParam,beat:evt.beat,duration:0.5,value:val,easing:"linear",fadeIn:0.1,fadeOut:0.1,startValue:param.min,endValue:param.min};
+            setCues(prev => [...(cueOverwrite ? overwriteCues(prev, [nc]) : prev), nc]);
           }
         });
       }
@@ -1040,6 +1064,7 @@ const FixturePadBar = React.memo(function FixturePadBar({ fixtures, cues, setCue
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button onClick={()=>setMode(m=>m==="rec"?null:"rec")} style={{padding:"4px 12px",background:mode==="rec"?"#ff2200":"#1a0a08",border:"2px solid "+(mode==="rec"?"#ff4422":"#3a1a14"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="rec"?"#fff":"#663322",boxShadow:mode==="rec"?"0 0 16px #ff220099":"none"}}>{mode==="rec"?"\u23FA REC":"\u23FA REC"}</button>
           <button onClick={()=>setMode(m=>m==="erase"?null:"erase")} style={{padding:"4px 12px",background:mode==="erase"?"#882200":"#100808",border:"2px solid "+(mode==="erase"?"#ff6600":"#2a1a10"),borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:"bold",color:mode==="erase"?"#ffaa44":"#443322"}}>{mode==="erase"?"\u2716 ERASE":"\u2716 ERASE"}</button>
+          <button onClick={()=>setCueOverwrite(o=>!o)} style={{padding:"4px 12px",background:cueOverwrite?"#1a1400":"#1a0a00",border:"2px solid "+(cueOverwrite?"#e8aa22":"#ff8844"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:cueOverwrite?"#e8aa22":"#ff8844"}}>{cueOverwrite?"\u21BB OVER":"\u2795 ADD"}</button>
           <button onClick={()=>setQuantize(q=>!q)} style={{padding:"4px 12px",background:quantize?"#162030":"#0c0f14",border:"2px solid "+(quantize?"#4488ff":"#252930"),borderRadius:4,cursor:"pointer",fontSize:10,fontWeight:"bold",color:quantize?"#4488ff":"#333"}}>{"\u266A"} {quantize?"QUANT":"FREE"}</button>
           <div style={{width:1,height:20,background:"#3a2020"}}/>
           {!midiConnected ? (
@@ -1351,7 +1376,7 @@ const AudioControlBar = React.memo(function AudioControlBar({ audioMode, setAudi
       {audioMode!=='none'&&<div style={{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}}>
         <button onClick={()=>setAudioMuted(m=>!m)} style={{padding:'2px 6px',fontSize:9,background:audioMuted?'#ff554422':'#0c0e12',border:`1px solid ${audioMuted?'#ff5544':'#252930'}`,color:audioMuted?'#ff5544':'#888',borderRadius:3,cursor:'pointer',fontWeight:audioMuted?'bold':'normal'}}>{audioMuted?'MUTED':'MUTE'}</button>
         <span style={{fontSize:8,color:'#444'}}>VOL</span>
-        <input type="range" min={0} max={1} step={0.01} value={audioVolume} onChange={e=>setAudioVolume(+e.target.value)} style={{width:60,accentColor:audioMuted?'#555':'#aa66dd',opacity:audioMuted?0.4:1}}/>
+        <div style={{width:60,opacity:audioMuted?0.4:1}}><GlowSlider min={0} max={100} step={1} value={Math.round(audioVolume*100)} onChange={v=>setAudioVolume(v/100)} color={audioMuted?'#555':'#aa66dd'} ticks={5}/></div>
         <span style={{fontSize:8,color:'#555'}}>{audioMuted?'--':Math.round(audioVolume*100)+'%'}</span>
       </div>}
     </div>
@@ -1493,6 +1518,7 @@ function LightingTimeline() {
   const [dragging,setDragging] = useState(null);
   const [resizing,setResizing] = useState(null);
   const [tool,setTool] = useState("select");
+  const [cueOverwrite,setCueOverwrite] = useState(true);
   const [bpm,setBpm] = useState(120);
   const [snapToGrid,setSnapToGrid] = useState(true);
   const [expandedFixtures,setExpandedFixtures] = useState(new Set([1,2]));
@@ -1528,7 +1554,7 @@ function LightingTimeline() {
   const [dmxPatch, setDmxPatch] = useState(() => {
     try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(fixtures); } catch(e) { return generateDefaultPatch(fixtures); }
   });
-  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25, inputEnabled:false, inputSourceIP:"", inputMonitor:false, dmxMode:"insert" });
+  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25, inputEnabled:false, inputSourceIP:"", inputMonitor:false, dmxMode:"source" });
   const [outputConnected, setOutputConnected] = useState(false);
   const dmxPatchRef = useRef(dmxPatch);
   const [dmxPatchModalOpen, setDmxPatchModalOpen] = useState(false);
@@ -1946,17 +1972,17 @@ function LightingTimeline() {
     const iv = setInterval(() => {
       const ws = outputWsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (mode === "source") {
-        // Source mode: send full timeline data to console
+      if (mode === "insert") {
+        // Insert mode: send full timeline data to console (console handles merge & output)
         const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
         if (Object.keys(universes).length === 0) return;
         ws.send(JSON.stringify({ type:"dmx_frame", universes }));
       } else if (useInput) {
-        // Insert mode with input: send sparse overrides (only active cue channels)
+        // Source mode with input: send sparse overrides (Lumina merges with console output)
         const overrides = buildDMXOverrides(liveValuesRef.current, dmxPatchRef.current);
         ws.send(JSON.stringify({ type:"dmx_frame", overrides }));
       } else {
-        // Legacy mode: send full universe frames
+        // Source mode without input: send full universe frames directly to fixtures
         const universes = buildDMXFrames(liveValuesRef.current, dmxPatchRef.current);
         if (Object.keys(universes).length === 0) return;
         ws.send(JSON.stringify({ type:"dmx_frame", universes }));
@@ -2004,7 +2030,7 @@ function LightingTimeline() {
     if(copyMode&&copiedCues&&row){
       const minBeat=Math.min(...copiedCues.map(c=>c.beat));
       const newCues=copiedCues.map(c=>({...c,id:genId(),fixtureId:row.fixtureId,beat:snapBeat(beat+(c.beat-minBeat))}));
-      setCues(prev=>[...prev,...newCues]);
+      setCues(prev=>[...(cueOverwrite?overwriteCues(prev,newCues):prev),...newCues]);
       setSelectedCues(new Set(newCues.map(c=>c.id)));
       return;
     }
@@ -2018,7 +2044,7 @@ function LightingTimeline() {
     const param=getParam(row.paramId);
     const newCue={id:genId(),fixtureId:row.fixtureId,param:row.paramId,beat,duration:2,value:Math.round((param.min+param.max)/2),easing:"linear",fadeIn:0,fadeOut:0,startValue:param.min,endValue:param.min};
     setSelectedCue(newCue.id);
-    setCues(prev=>[...prev,newCue]);
+    setCues(prev=>[...(cueOverwrite?overwriteCues(prev,[newCue]):prev),newCue]);
   };
 
   const handleCueTouchStart=(e,cue)=>{const t=e.touches[0];handleCueMouseDown({clientX:t.clientX,clientY:t.clientY,target:e.target,stopPropagation:()=>e.stopPropagation()},cue);};
@@ -2188,8 +2214,8 @@ function LightingTimeline() {
               {label:"\u223F DISSOLVE",color:"#ffaa44",bg:"#1a1208",border:"#ffaa4444",action:handleDissolve,need:2},
               {label:"\u21C4 REVERSE",color:"#ffaa44",bg:"#1a1208",border:"#ffaa4444",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length<2)return prev;const groups={};sel.forEach(c=>{const k=c.fixtureId+"-"+c.param;if(!groups[k])groups[k]=[];groups[k].push(c);});const updates={};Object.values(groups).forEach(g=>{if(g.length<2)return;g.sort((a,b)=>a.beat-b.beat);const beats=g.map(c=>c.beat);const reversed=[...beats].reverse();g.forEach((c,i)=>{updates[c.id]={beat:reversed[i]};});});if(Object.keys(updates).length===0)return prev;return prev.map(c=>updates[c.id]?{...c,...updates[c.id]}:c);});},need:2},
               (()=>{const anyMuted=cues.filter(c=>selectedCues.has(c.id)).some(c=>c.muted);return{label:anyMuted?"\uD83D\uDD0A UNBLACK":"\uD83D\uDD07 BLACKOUT",color:anyMuted?"#ff6633":"#ff9933",bg:anyMuted?"#1a0800":"#1a0f00",border:anyMuted?"#ff664466":"#ff993344",action:()=>{setCues(prev=>prev.map(c=>selectedCues.has(c.id)?{...c,muted:!anyMuted}:c));},need:1};})(),
-              {label:"\u29C9 DUP NEXT FX",color:"#44ddaa",bg:"#0a1a1a",border:"#44ddaa44",action:()=>{const len=fxEnd-fxStart;setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id)&&c.beat>=fxStart&&c.beat<fxEnd);if(sel.length===0)return prev;const newCues=sel.map(c=>({...c,id:genId(),beat:c.beat+len}));return[...prev,...newCues];});setFxStart(fxStart+len);setFxEnd(fxEnd+len);setSelectedCues(new Set());},need:1},
-              {label:"\u29C9 DUPLICATE",color:"#44ddaa",bg:"#0a1a1a",border:"#44ddaa44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));const maxBeat=Math.max(...sel.map(c=>c.beat+c.duration));const minBeat=Math.min(...sel.map(c=>c.beat));const offset=maxBeat-minBeat;const newCues=sel.map(c=>({...c,id:genId(),beat:c.beat+offset}));return[...prev,...newCues];});setSelectedCues(new Set());},need:1},
+              {label:"\u29C9 DUP NEXT FX",color:"#44ddaa",bg:"#0a1a1a",border:"#44ddaa44",action:()=>{const len=fxEnd-fxStart;setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id)&&c.beat>=fxStart&&c.beat<fxEnd);if(sel.length===0)return prev;const newCues=sel.map(c=>({...c,id:genId(),beat:c.beat+len}));return[...(cueOverwrite?overwriteCues(prev,newCues):prev),...newCues];});setFxStart(fxStart+len);setFxEnd(fxEnd+len);setSelectedCues(new Set());},need:1},
+              {label:"\u29C9 DUPLICATE",color:"#44ddaa",bg:"#0a1a1a",border:"#44ddaa44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));const maxBeat=Math.max(...sel.map(c=>c.beat+c.duration));const minBeat=Math.min(...sel.map(c=>c.beat));const offset=maxBeat-minBeat;const newCues=sel.map(c=>({...c,id:genId(),beat:c.beat+offset}));return[...(cueOverwrite?overwriteCues(prev,newCues):prev),...newCues];});setSelectedCues(new Set());},need:1},
               {label:"\u2502\u2190 ALIGN START",color:"#44aaff",bg:"#0a1420",border:"#44aaff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length<2)return prev;const earliest=Math.min(...sel.map(c=>c.beat));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:earliest}:c);});},need:2},
               {label:"\u2192\u2502 ALIGN END",color:"#44aaff",bg:"#0a1420",border:"#44aaff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length<2)return prev;const latest=Math.max(...sel.map(c=>c.beat+c.duration));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:latest-c.duration}:c);});},need:2},
               {label:"\u23EA HALF TIME",color:"#44ddff",bg:"#0a1a2a",border:"#44ddff44",action:()=>{setCues(prev=>{const sel=prev.filter(c=>selectedCues.has(c.id));if(sel.length===0)return prev;const minBeat=Math.min(...sel.map(c=>c.beat));const ids=new Set(sel.map(c=>c.id));return prev.map(c=>ids.has(c.id)?{...c,beat:minBeat+(c.beat-minBeat)*2}:c);});},need:1},
@@ -2275,7 +2301,7 @@ function LightingTimeline() {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:9,color:"#444"}}>ZOOM</span>
-          <input type="range" min={0.3} max={3} step={0.05} value={zoom} onChange={e=>setZoom(+e.target.value)} style={{width:70,accentColor:"#cc9944"}}/>
+          <div style={{width:70}}><GlowSlider min={30} max={300} step={5} value={Math.round(zoom*100)} onChange={v=>setZoom(v/100)} color="#cc9944" ticks={5}/></div>
           <span style={{fontSize:9,color:"#555"}}>{Math.round(zoom*100)}%</span>
         </div>
       </div>
@@ -2483,11 +2509,11 @@ function LightingTimeline() {
                   </div>
                 </div>
                 <div style={{flex:1,overflow:"auto"}}>
-                  <EffectGenerator fixtures={fixtures} setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups}/>
+                  <EffectGenerator fixtures={fixtures} setCues={setCues} loopStart={loopStart} loopEnd={loopEnd} fxStart={fxStart} fxEnd={fxEnd} setExpandedFixtures={setExpandedFixtures} setExpandedGroups={setExpandedGroups} cueOverwrite={cueOverwrite}/>
                 </div>
               </div>
             ):rightTab==="seq"?(
-              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={displayPlayhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes} bpm={bpm}/>
+              <SequenceStoragePanel fixtures={fixtures} setFixtures={setFixtures} setDmxPatch={setDmxPatch} sequenceStorage={sequenceStorage} setSequenceStorage={setSequenceStorage} seqCategory={seqCategory} setSeqCategory={setSeqCategory} seqStoreMode={seqStoreMode} setSeqStoreMode={setSeqStoreMode} seqClearMode={seqClearMode} setSeqClearMode={setSeqClearMode} seqRecallMode={seqRecallMode} setSeqRecallMode={setSeqRecallMode} seqFadeBeats={seqFadeBeats} setSeqFadeBeats={setSeqFadeBeats} cues={cues} selectedCues={selectedCues} setCues={setCues} lastRecalledBatchId={lastRecalledBatchId} setLastRecalledBatchId={setLastRecalledBatchId} liveValues={liveValues} playhead={displayPlayhead} mutedLanes={mutedLanes} setMutedLanes={setMutedLanes} bpm={bpm} cueOverwrite={cueOverwrite}/>
             ):(
               <div style={{padding:10,display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2}}>OUTPUT ENGINE</div>
@@ -2498,17 +2524,12 @@ function LightingTimeline() {
 
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX MODE</div>
                 <div style={{display:"flex",gap:4}}>
-                  {[{id:"insert",label:"INSERT",desc:"Lumina → Fixtures",icon:"⇥"},{id:"source",label:"SOURCE",desc:"Lumina → Console",icon:"⇤"}].map(mode=>(
-                    <button key={mode.id} onClick={()=>setOutputConfig(c=>({...c,dmxMode:mode.id}))} style={{flex:1,padding:"8px 0",fontSize:12,fontWeight:"bold",letterSpacing:1,background:outputConfig.dmxMode===mode.id?"#1a1400":"#0c0e12",border:"2px solid "+(outputConfig.dmxMode===mode.id?"#e8aa22":"#252930"),color:outputConfig.dmxMode===mode.id?"#e8aa22":"#555",borderRadius:6,cursor:"pointer",minHeight:44,touchAction:"manipulation",display:"flex",flexDirection:"column",alignItems:"center",gap:2,boxShadow:outputConfig.dmxMode===mode.id?"0 0 10px #e8aa2233":"none"}}>
+                  {[{id:"insert",label:"INSERT",desc:"Lumina → Console",icon:"⇤"},{id:"source",label:"SOURCE",desc:"Console → Lumina → Fixtures",icon:"⇥"}].map(mode=>(
+                    <button key={mode.id} onClick={()=>setOutputConfig(c=>({...c,dmxMode:mode.id}))} style={{flex:1,padding:"4px 0",fontSize:11,fontWeight:"bold",letterSpacing:1,background:outputConfig.dmxMode===mode.id?"#1a1400":"#0c0e12",border:"2px solid "+(outputConfig.dmxMode===mode.id?"#e8aa22":"#252930"),color:outputConfig.dmxMode===mode.id?"#e8aa22":"#555",borderRadius:6,cursor:"pointer",minHeight:33,touchAction:"manipulation",display:"flex",flexDirection:"column",alignItems:"center",gap:1,boxShadow:outputConfig.dmxMode===mode.id?"0 0 10px #e8aa2233":"none"}}>
                       <span>{mode.icon} {mode.label}</span>
                       <span style={{fontSize:7,color:outputConfig.dmxMode===mode.id?"#e8aa2288":"#333",letterSpacing:0,fontWeight:"normal"}}>{mode.desc}</span>
                     </button>
                   ))}
-                </div>
-                <div style={{fontSize:7,color:"#555",padding:"2px 0",lineHeight:1.4}}>
-                  {outputConfig.dmxMode==="insert"
-                    ?"Insert mode: Lumina receives ArtNet from console, merges effects, outputs to fixtures. Lumina sits between console and fixtures."
-                    :"Source mode: Lumina sends effect data as ArtNet input to the console. Console handles merge & output via its own NPUs/MPUs. Best for GrandMA setups."}
                 </div>
 
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>PROTOCOLS</div>
@@ -2554,17 +2575,37 @@ function LightingTimeline() {
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       <span style={{fontSize:8,color:"#aa66dd",width:28}}>IN:</span>
-                      <select value={nicConfig.inputIP} onChange={e=>{const ip=e.target.value;setNicConfig(c=>({...c,inputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",inputIP:ip}));}} style={{flex:1,background:"#0c0e12",border:"1px solid #3a2a44",color:"#aa66dd",borderRadius:3,padding:"2px 4px",fontSize:9}}>
-                        <option value="0.0.0.0">Any (all interfaces)</option>
-                        {nicList.map(n=><option key={"in-"+n.ip} value={n.ip}>{n.name} — {n.ip}</option>)}
-                      </select>
+                      <div style={{position:"relative",flex:1}}>
+                        <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='nic_in'?null:{field:'nic_in',rect:{top:r.bottom+2,left:r.left,width:r.width}});}} style={{background:"#0c0e12",border:"1px solid "+(keypadState?.field==='nic_in'?"#aa66dd":"#3a2a44"),color:"#aa66dd",borderRadius:3,padding:"3px 6px",fontSize:10,cursor:"pointer",userSelect:"none",minHeight:18,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nicConfig.inputIP==="0.0.0.0"?"Any (all interfaces)":(nicList.find(n=>n.ip===nicConfig.inputIP)||{}).name+" — "+nicConfig.inputIP||nicConfig.inputIP}</div>
+                        {keypadState?.field==='nic_in'&&(<>
+                          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
+                          <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",bottom:8,left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #aa66dd44",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:300,display:"flex",flexDirection:"column",gap:3}}>
+                            {[{ip:"0.0.0.0",label:"Any (all interfaces)"},...nicList.map(n=>({ip:n.ip,label:n.name+" — "+n.ip}))].map(opt=>{const isSel=nicConfig.inputIP===opt.ip;return(
+                              <div key={opt.ip} onClick={()=>{const ip=opt.ip;setNicConfig(c=>({...c,inputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",inputIP:ip}));setKeypadState(null);}} style={{padding:"10px 12px",fontSize:13,color:isSel?"#aa66dd":"#ccc",background:isSel?"#aa66dd18":"transparent",borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",gap:10,minHeight:44,touchAction:"manipulation"}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?"#aa66dd18":"transparent";}}>
+                                <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.label}</span>
+                                {isSel&&<span style={{color:"#aa66dd",fontSize:14}}>✓</span>}
+                              </div>
+                            );})}
+                          </div>
+                        </>)}
+                      </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       <span style={{fontSize:8,color:"#aa66dd",width:28}}>OUT:</span>
-                      <select value={nicConfig.outputIP} onChange={e=>{const ip=e.target.value;setNicConfig(c=>({...c,outputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",outputIP:ip}));}} style={{flex:1,background:"#0c0e12",border:"1px solid #3a2a44",color:"#aa66dd",borderRadius:3,padding:"2px 4px",fontSize:9}}>
-                        <option value="0.0.0.0">Default (all interfaces)</option>
-                        {nicList.map(n=><option key={"out-"+n.ip} value={n.ip}>{n.name} — {n.ip} → {n.broadcast}</option>)}
-                      </select>
+                      <div style={{position:"relative",flex:1}}>
+                        <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='nic_out'?null:{field:'nic_out',rect:{top:r.bottom+2,left:r.left,width:r.width}});}} style={{background:"#0c0e12",border:"1px solid "+(keypadState?.field==='nic_out'?"#aa66dd":"#3a2a44"),color:"#aa66dd",borderRadius:3,padding:"3px 6px",fontSize:10,cursor:"pointer",userSelect:"none",minHeight:18,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nicConfig.outputIP==="0.0.0.0"?"Default (all interfaces)":(nicList.find(n=>n.ip===nicConfig.outputIP)||{}).name+" — "+nicConfig.outputIP||nicConfig.outputIP}</div>
+                        {keypadState?.field==='nic_out'&&(<>
+                          <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
+                          <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",bottom:8,left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #aa66dd44",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:300,display:"flex",flexDirection:"column",gap:3}}>
+                            {[{ip:"0.0.0.0",label:"Default (all interfaces)"},...nicList.map(n=>({ip:n.ip,label:n.name+" — "+n.ip+" → "+n.broadcast}))].map(opt=>{const isSel=nicConfig.outputIP===opt.ip;return(
+                              <div key={opt.ip} onClick={()=>{const ip=opt.ip;setNicConfig(c=>({...c,outputIP:ip}));if(outputWsRef.current?.readyState===WebSocket.OPEN)outputWsRef.current.send(JSON.stringify({type:"network_config",outputIP:ip}));setKeypadState(null);}} style={{padding:"10px 12px",fontSize:13,color:isSel?"#aa66dd":"#ccc",background:isSel?"#aa66dd18":"transparent",borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",gap:10,minHeight:44,touchAction:"manipulation"}} onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background="#ffffff0a";}} onMouseLeave={e=>{e.currentTarget.style.background=isSel?"#aa66dd18":"transparent";}}>
+                                <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.label}</span>
+                                {isSel&&<span style={{color:"#aa66dd",fontSize:14}}>✓</span>}
+                              </div>
+                            );})}
+                          </div>
+                        </>)}
+                      </div>
                     </div>
                   </div>
                 ):(
@@ -2573,7 +2614,7 @@ function LightingTimeline() {
 
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX RATE</div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <input type="range" min={10} max={50} value={outputConfig.dmxRate} onChange={e=>setOutputConfig(c=>({...c,dmxRate:+e.target.value}))} style={{flex:1,accentColor:"#ff8844"}}/>
+                  <div style={{flex:1}}><GlowSlider min={10} max={50} step={1} value={outputConfig.dmxRate} onChange={v=>setOutputConfig(c=>({...c,dmxRate:v}))} color="#ff8844" ticks={8}/></div>
                   <span style={{fontSize:9,color:"#ff8844",width:40,textAlign:"right"}}>{Math.round(1000/outputConfig.dmxRate)}Hz</span>
                 </div>
 
@@ -3327,7 +3368,7 @@ function LightingTimeline() {
                     <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='type_dropdown'&&prev.fxId===fx.id?null:{field:'type_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:100,background:"#080a0e",border:"1px solid "+(keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id?"#e8aa22":"#1e222a"),color:"#e8aa22",borderRadius:2,padding:"3px 4px",fontSize:10,cursor:"pointer",userSelect:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fx.type} ({(DMX_PROFILES[fx.type]||{channels:"?"}).channels}ch)</div>
                     {keypadState?.field==='type_dropdown'&&keypadState?.fxId===fx.id&&(<>
                       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
-                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-420),left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:400,overflowY:"auto",width:300,display:"flex",flexDirection:"column",gap:3,WebkitOverflowScrolling:"touch"}}>
+                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",bottom:8,left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-308)),zIndex:10002,background:"#141820",border:"1px solid #e8aa2244",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:300,display:"flex",flexDirection:"column",gap:3}}>
                         {Object.keys(DMX_PROFILES).filter(t=>!hiddenProfiles.has(t)).map(t=>{
                           const isCore = CORE_PROFILES.has(t);
                           const isBuiltin = BUILTIN_PROFILES.has(t);
@@ -3349,7 +3390,7 @@ function LightingTimeline() {
                     <div onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setKeypadState(prev=>prev?.field==='pos_dropdown'&&prev.fxId===fx.id?null:{field:'pos_dropdown',fxId:fx.id,rect:{top:r.bottom+2,left:r.left}});}} style={{width:80,background:"#080a0e",border:"1px solid "+(keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id?POSITION_COLORS[fx.position||"FRONT 1"]||"#888":"#1e222a"),color:POSITION_COLORS[fx.position||"FRONT 1"]||"#888",borderRadius:2,padding:"3px 4px",fontSize:9,cursor:"pointer",userSelect:"none"}}>{fx.position||"FRONT 1"}</div>
                     {keypadState?.field==='pos_dropdown'&&keypadState?.fxId===fx.id&&(<>
                       <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:10001}} onClick={()=>setKeypadState(null)}/>
-                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",top:Math.min(keypadState.rect.top,window.innerHeight-420),left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-208)),zIndex:10002,background:"#141820",border:"1px solid #44ffaa44",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",maxHeight:400,overflowY:"auto",width:200,display:"flex",flexDirection:"column",gap:3,WebkitOverflowScrolling:"touch"}}>
+                      <div onClick={e=>e.stopPropagation()} onTouchStart={e=>e.stopPropagation()} style={{position:"fixed",bottom:8,left:Math.max(8,Math.min(keypadState.rect.left,window.innerWidth-208)),zIndex:10002,background:"#141820",border:"1px solid #44ffaa44",borderRadius:8,padding:6,boxShadow:"0 8px 24px rgba(0,0,0,0.9)",width:200,display:"flex",flexDirection:"column",gap:3}}>
                         {FIXTURE_POSITIONS.map(p=>{
                           const posCol=POSITION_COLORS[p]||"#888";
                           const isSel=(fx.position||"FRONT 1")===p;
@@ -4245,7 +4286,7 @@ function LightingTimeline() {
         </div>
       )}
 
-      <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={displayPlayhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect}/>
+      <FixturePadBar fixtures={fixtures} cues={cues} setCues={setCues} playhead={displayPlayhead} playheadRef={playheadRef} beatEventRef={beatEventRef} audioMode={audioMode} onParamSelect={handleParamSelect} cueOverwrite={cueOverwrite} setCueOverwrite={setCueOverwrite}/>
 
       <div style={{height:22,background:"#1a1814",borderTop:"1px solid #3a3020",display:"flex",alignItems:"center",padding:"0 14px",gap:20,flexShrink:0}}>
         {[{label:"FIX",val:fixtures.length},{label:"TOOL",val:tool.toUpperCase()},{label:"CUES",val:cues.length},{label:"LOOP",val:loopEnabled?`${loopStart}-${loopEnd} beats`:"OFF"},{label:"BPM",val:bpm},{label:"AUDIO",val:audioMode==='none'?'OFF':audioMode==='file'?(audioFileName||'FILE'):'MIC'},{label:"OUTPUT",val:outputConfig.enabled?(outputConnected?"LIVE":"DISC"):"OFF"},{label:"INPUT",val:outputConfig.inputEnabled?"ON":"OFF"}].map(item=>(

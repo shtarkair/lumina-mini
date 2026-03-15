@@ -234,7 +234,7 @@ let networkConfig = {
 };
 
 // --- Per-client protocol config ---
-let clientConfig = { artnet: true, sacn: false, artnetHost: '255.255.255.255', dmxMode: 'insert' };
+let clientConfig = { artnet: true, sacn: false, artnetHost: '255.255.255.255', dmxMode: 'source' };
 
 // --- Per-universe routing config (sparse: only custom-routed universes listed) ---
 // Format: { "1": { artnet: { ip, universe }, sacn: { universe } }, ... }
@@ -1206,20 +1206,12 @@ function mergeUniverse(universe) {
   const overrides = clientOverrides[universe];
   const out = outputBuffer[universe];
 
-  if (clientConfig.dmxMode === 'source') {
-    // Source mode: send ONLY Lumina's effect data to the console
-    // No merge with input — console handles its own merge
-    out.fill(0);
-    if (overrides) {
-      for (const chStr in overrides) {
-        const ch = parseInt(chStr);
-        if (ch >= 0 && ch < 512) {
-          out[ch] = overrides[chStr];
-        }
-      }
-    }
+  if (clientConfig.dmxMode === 'insert') {
+    // Insert mode: send ONLY Lumina's effect data TO the console
+    // No merge with input — console handles its own merge via NPUs/MPUs
+    // outputBuffer already populated by dmx_frame handler (full universe frames)
   } else if (inputConfig.enabled) {
-    // Insert mode: start with console input, overlay Lumina overrides
+    // Source mode: Lumina sits after console, merges effects with console output
     out.set(inp);
     if (overrides) {
       for (const chStr in overrides) {
@@ -1455,8 +1447,8 @@ wss.on('connection', (ws) => {
 
       // --- DMX frame (sparse overrides from client) ---
       if (msg.type === 'dmx_frame') {
-        if (inputConfig.enabled && clientConfig.dmxMode !== 'source' && msg.overrides) {
-          // Insert mode with input: sparse overrides — only active cue channels
+        if (inputConfig.enabled && clientConfig.dmxMode !== 'insert' && msg.overrides) {
+          // Source mode with input: sparse overrides — only active cue channels
           for (const [uniStr, channels] of Object.entries(msg.overrides)) {
             const uni = parseInt(uniStr);
             if (uni < 1 || uni > MAX_UNIVERSES) continue;
