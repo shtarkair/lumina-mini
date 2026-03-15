@@ -234,7 +234,7 @@ let networkConfig = {
 };
 
 // --- Per-client protocol config ---
-let clientConfig = { artnet: true, sacn: false, artnetHost: '255.255.255.255' };
+let clientConfig = { artnet: true, sacn: false, artnetHost: '255.255.255.255', dmxMode: 'insert' };
 
 // --- Per-universe routing config (sparse: only custom-routed universes listed) ---
 // Format: { "1": { artnet: { ip, universe }, sacn: { universe } }, ... }
@@ -1206,8 +1206,20 @@ function mergeUniverse(universe) {
   const overrides = clientOverrides[universe];
   const out = outputBuffer[universe];
 
-  if (inputConfig.enabled) {
-    // Input mode: start with console input, overlay Lumina overrides
+  if (clientConfig.dmxMode === 'source') {
+    // Source mode: send ONLY Lumina's effect data to the console
+    // No merge with input — console handles its own merge
+    out.fill(0);
+    if (overrides) {
+      for (const chStr in overrides) {
+        const ch = parseInt(chStr);
+        if (ch >= 0 && ch < 512) {
+          out[ch] = overrides[chStr];
+        }
+      }
+    }
+  } else if (inputConfig.enabled) {
+    // Insert mode: start with console input, overlay Lumina overrides
     out.set(inp);
     if (overrides) {
       for (const chStr in overrides) {
@@ -1351,6 +1363,7 @@ wss.on('connection', (ws) => {
         if (msg.artnet !== undefined) clientConfig.artnet = msg.artnet;
         if (msg.sacn !== undefined) clientConfig.sacn = msg.sacn;
         if (msg.artnetHost) clientConfig.artnetHost = msg.artnetHost;
+        if (msg.dmxMode) clientConfig.dmxMode = msg.dmxMode;
         if (msg.dmxRate) {
           outputRate = msg.dmxRate;
           if (outputEnabled) restartOutputLoop();

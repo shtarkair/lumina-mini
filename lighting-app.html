@@ -1528,7 +1528,7 @@ function LightingTimeline() {
   const [dmxPatch, setDmxPatch] = useState(() => {
     try { return JSON.parse(localStorage.getItem("lumina-dmx-patch")) || generateDefaultPatch(fixtures); } catch(e) { return generateDefaultPatch(fixtures); }
   });
-  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25, inputEnabled:false, inputSourceIP:"", inputMonitor:false });
+  const [outputConfig, setOutputConfig] = useState({ enabled:false, artnet:true, sacn:false, artnetHost:"127.0.0.1", dmxRate:25, inputEnabled:false, inputSourceIP:"", inputMonitor:false, dmxMode:"insert" });
   const [outputConnected, setOutputConnected] = useState(false);
   const dmxPatchRef = useRef(dmxPatch);
   const [dmxPatchModalOpen, setDmxPatchModalOpen] = useState(false);
@@ -1839,7 +1839,7 @@ function LightingTimeline() {
         const ws = new WebSocket(`ws://${location.host}`);
         ws.onopen = () => {
           setOutputConnected(true);
-          ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate }));
+          ws.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate, dmxMode:outputConfig.dmxMode }));
           ws.send(JSON.stringify({ type:"input_config", enabled:outputConfig.inputEnabled, sourceIP:outputConfig.inputSourceIP||null, forwardToClient:outputConfig.inputMonitor }));
           ws.send(JSON.stringify({ type:"output_control", enabled:outputConfig.enabled }));
           ws.send(JSON.stringify({ type:"universe_routing", routing:universeRoutingRef.current }));
@@ -1916,7 +1916,7 @@ function LightingTimeline() {
   // Send config updates when protocol settings change
   useEffect(() => {
     if (outputWsRef.current?.readyState === WebSocket.OPEN) {
-      outputWsRef.current.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate }));
+      outputWsRef.current.send(JSON.stringify({ type:"config", artnet:outputConfig.artnet, sacn:outputConfig.sacn, artnetHost:outputConfig.artnetHost, dmxRate:outputConfig.dmxRate, dmxMode:outputConfig.dmxMode }));
     }
   }, [outputConfig.artnet, outputConfig.sacn, outputConfig.artnetHost, outputConfig.dmxRate]);
 
@@ -2488,6 +2488,21 @@ function LightingTimeline() {
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <button onClick={()=>setOutputConfig(c=>({...c,enabled:!c.enabled}))} style={{flex:1,padding:"12px 0",fontSize:13,fontWeight:"bold",letterSpacing:1,background:outputConfig.enabled?"#0a2a1a":"#0c0e12",border:"2px solid "+(outputConfig.enabled?"#22cc55":"#252930"),color:outputConfig.enabled?"#22cc55":"#555",borderRadius:6,cursor:"pointer",minHeight:44,touchAction:"manipulation"}}>{outputConfig.enabled?"OUTPUT ON":"OUTPUT OFF"}</button>
                   <div style={{width:8,height:8,borderRadius:"50%",background:outputConnected?"#22cc55":outputConfig.enabled?"#ff4422":"#333",boxShadow:outputConnected?"0 0 8px #22cc5588":"none"}}/>
+                </div>
+
+                <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>DMX MODE</div>
+                <div style={{display:"flex",gap:4}}>
+                  {[{id:"insert",label:"INSERT",desc:"Lumina → Fixtures",icon:"⇥"},{id:"source",label:"SOURCE",desc:"Lumina → Console",icon:"⇤"}].map(mode=>(
+                    <button key={mode.id} onClick={()=>setOutputConfig(c=>({...c,dmxMode:mode.id}))} style={{flex:1,padding:"8px 0",fontSize:12,fontWeight:"bold",letterSpacing:1,background:outputConfig.dmxMode===mode.id?"#1a1400":"#0c0e12",border:"2px solid "+(outputConfig.dmxMode===mode.id?"#e8aa22":"#252930"),color:outputConfig.dmxMode===mode.id?"#e8aa22":"#555",borderRadius:6,cursor:"pointer",minHeight:44,touchAction:"manipulation",display:"flex",flexDirection:"column",alignItems:"center",gap:2,boxShadow:outputConfig.dmxMode===mode.id?"0 0 10px #e8aa2233":"none"}}>
+                      <span>{mode.icon} {mode.label}</span>
+                      <span style={{fontSize:7,color:outputConfig.dmxMode===mode.id?"#e8aa2288":"#333",letterSpacing:0,fontWeight:"normal"}}>{mode.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{fontSize:7,color:"#555",padding:"2px 0",lineHeight:1.4}}>
+                  {outputConfig.dmxMode==="insert"
+                    ?"Insert mode: Lumina receives ArtNet from console, merges effects, outputs to fixtures. Lumina sits between console and fixtures."
+                    :"Source mode: Lumina sends effect data as ArtNet input to the console. Console handles merge & output via its own NPUs/MPUs. Best for GrandMA setups."}
                 </div>
 
                 <div style={{fontSize:8,color:"#ff884466",letterSpacing:2,marginTop:4}}>PROTOCOLS</div>
